@@ -1,0 +1,8 @@
+venv
+documents/
+processed_documents/
+.idea
+__pycache__/
+script/utils/chrome-dir
+.env
+*.json
