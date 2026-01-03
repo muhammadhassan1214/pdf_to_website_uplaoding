@@ -6,3 +6,5 @@ __pycache__/
 script/utils/chrome-dir
 .env
 *.json
+workflow_verification.md
+

@@ -919,7 +919,397 @@ Return ONLY a valid JSON array with the extracted data. No additional text or ex
         return []
 
 
-def parse_data_from_pdf(pdf_path, use_cache=True, move_after_processing=True):
+def extract_wheel_specs_from_first_table(first_table_data):
+    """
+    Extract wheel specifications (holes, pcd, centre_bore, offset) from the first table.
+
+    The first table typically contains wheel specs in formats like:
+    - Lochzahl (holes): "5"
+    - Lochkreis (pcd): "112"
+    - Mittenbohrung (centre_bore): "66,6" or "66.6"
+    - Einpreßtiefe/Einpresstiefe/ET (offset): "48"
+
+    Or combined format like "5/112/66,6" with offset separately.
+
+    Args:
+        first_table_data: List of dictionaries from first table
+
+    Returns:
+        dict: Dictionary with holes, pcd, centre_bore, offset (or None for missing values)
+    """
+    specs = {
+        'holes': None,
+        'pcd': None,
+        'centre_bore': None,
+        'offset': None
+    }
+
+    if not first_table_data:
+        return specs
+
+    # Look through all rows and columns for the specs
+    for row in first_table_data:
+        for key, value in row.items():
+            if value is None:
+                continue
+            value_str = str(value).strip()
+            # Normalize key by removing newlines and converting to lowercase
+            key_normalized = str(key).replace('\n', ' ').lower() if key else ''
+
+            # Check for combined format like "5/112/66,6"
+            combined_match = re.match(r'^(\d+)\s*/\s*(\d+)\s*/\s*(\d+[,.]?\d*)$', value_str)
+            if combined_match:
+                specs['holes'] = combined_match.group(1)
+                specs['pcd'] = combined_match.group(2)
+                specs['centre_bore'] = combined_match.group(3).replace(',', '.')
+                continue
+
+            # Check individual columns by header name patterns
+            # Handle variations with newlines, spaces, and German umlauts
+            if any(x in key_normalized for x in ['lochzahl', 'holes', 'bolt holes']):
+                match = re.search(r'(\d+)', value_str)
+                if match and specs['holes'] is None:
+                    specs['holes'] = match.group(1)
+            elif any(x in key_normalized for x in ['lochkreis', 'pcd', 'pitch circle']):
+                match = re.search(r'(\d+)', value_str)
+                if match and specs['pcd'] is None:
+                    specs['pcd'] = match.group(1)
+            elif any(x in key_normalized for x in ['mittenbohrung', 'mittenloch', 'centre bore', 'center bore', 'hub bore']):
+                match = re.search(r'(\d+[,.]?\d*)', value_str)
+                if match and specs['centre_bore'] is None:
+                    specs['centre_bore'] = match.group(1).replace(',', '.')
+            elif any(x in key_normalized for x in ['einpress', 'offset', ' et ', 'et(mm)', 'tiefe']):
+                match = re.search(r'(\d+)', value_str)
+                if match and specs['offset'] is None:
+                    specs['offset'] = match.group(1)
+
+    return specs
+
+
+def validate_extracted_data(data_item):
+    """
+    Validate extracted data to ensure it meets quality requirements.
+
+    Validation rules:
+    - Title should start with a number (e.g., "19 Inch...")
+    - Required fields should not be None or empty
+
+    Args:
+        data_item: Dictionary containing extracted data
+
+    Returns:
+        tuple: (is_valid, error_messages)
+    """
+    errors = []
+
+    # Check if title starts with a number
+    title = data_item.get('Title')
+    if title:
+        if not re.match(r'^\d+', str(title).strip()):
+            errors.append("Title should start with a number (e.g., '19 Inch...')")
+    else:
+        errors.append("Title is missing")
+
+    # Check required numeric fields
+    if data_item.get('Tyre_dia') is None:
+        errors.append("Tyre_dia is missing")
+
+    if data_item.get('Tyre_Width') is None:
+        errors.append("Tyre_Width is missing")
+
+    # Check required string fields
+    required_strings = ['Model', 'holes', 'pcd', 'centre_bore', 'offset', 'tire_size']
+    for field in required_strings:
+        value = data_item.get(field)
+        if value is None or str(value).strip() == '':
+            errors.append(f"{field} is missing")
+
+    return len(errors) == 0, errors
+
+
+def split_long_title_task(task, max_length=80):
+    """
+    Split a task with a long title into multiple tasks with shorter titles.
+
+    The title format is typically:
+    "{size} Inch All-season Complete Wheels set for {Manufacturer} {Model1}, {Model2}, ..."
+
+    This function splits the models into groups that fit within the max_length limit.
+
+    Args:
+        task: Dictionary containing task data with a 'Title' key
+        max_length: Maximum allowed title length (default: 80)
+
+    Returns:
+        list: List of tasks (original if title <= max_length, or split tasks)
+    """
+    title = task.get('Title')
+
+    if not title or len(title) <= max_length:
+        return [task]
+
+    # Parse the title to extract the prefix and models
+    # Expected format: "{size} Inch All-season Complete Wheels set for {Manufacturer} {Models}"
+    # or "{size} Inch All-season Complete Wheels set for {Models}"
+
+    match = re.match(r'^(\d+\s+Inch\s+All-season\s+Complete\s+Wheels\s+set\s+for\s+)(.+)$', title)
+
+    if not match:
+        # Can't parse the title format, return as-is
+        return [task]
+
+    prefix = match.group(1)  # e.g., "18 Inch All-season Complete Wheels set for "
+    models_part = match.group(2)  # e.g., "BMW 1er-Reihe, 2er-Reihe, ..."
+
+    # Try to extract manufacturer from the models part
+    # Check if it starts with a known manufacturer
+    manufacturer = None
+    manufacturer_patterns = [
+        (r'^(BMW)\s+', 'BMW'),
+        (r'^(Audi)\s+', 'Audi'),
+        (r'^(Mercedes)\s+', 'Mercedes'),
+        (r'^(VW|Volkswagen)\s+', 'VW'),
+        (r'^(Seat)\s+', 'Seat'),
+        (r'^(Skoda)\s+', 'Skoda'),
+        (r'^(Ford)\s+', 'Ford'),
+        (r'^(Porsche)\s+', 'Porsche'),
+        (r'^(Mini)\s+', 'Mini'),
+        (r'^(Infiniti)\s+', 'Infiniti'),
+        (r'^(Mazda)\s+', 'Mazda'),
+        (r'^(Ssangyong)\s+', 'Ssangyong'),
+    ]
+
+    for pattern, mfr in manufacturer_patterns:
+        mfr_match = re.match(pattern, models_part, re.IGNORECASE)
+        if mfr_match:
+            manufacturer = mfr
+            models_part = models_part[len(mfr_match.group(0)):].strip()
+            break
+
+    # Split models by comma
+    models = [m.strip() for m in models_part.split(',') if m.strip()]
+
+    if not models:
+        return [task]
+
+    # Group models to fit within max_length
+    split_tasks = []
+    current_models = []
+
+    for model in models:
+        # Calculate what the title would be with this model added
+        if manufacturer:
+            test_models_str = ', '.join(current_models + [model])
+            test_title = f"{prefix}{manufacturer} {test_models_str}"
+        else:
+            test_models_str = ', '.join(current_models + [model])
+            test_title = f"{prefix}{test_models_str}"
+
+        if len(test_title) <= max_length or not current_models:
+            # Can add this model, or it's the first model (must include at least one)
+            current_models.append(model)
+        else:
+            # Current group is full, create a task and start a new group
+            if manufacturer:
+                new_title = f"{prefix}{manufacturer} {', '.join(current_models)}"
+            else:
+                new_title = f"{prefix}{', '.join(current_models)}"
+
+            new_task = task.copy()
+            new_task['Title'] = new_title
+            split_tasks.append(new_task)
+
+            # Start new group with current model
+            current_models = [model]
+
+    # Don't forget the last group
+    if current_models:
+        if manufacturer:
+            new_title = f"{prefix}{manufacturer} {', '.join(current_models)}"
+        else:
+            new_title = f"{prefix}{', '.join(current_models)}"
+
+        new_task = task.copy()
+        new_task['Title'] = new_title
+        split_tasks.append(new_task)
+
+    return split_tasks if split_tasks else [task]
+
+
+def process_tasks_with_title_splitting(tasks, max_title_length=80):
+    """
+    Process a list of tasks and split any tasks with titles exceeding max_title_length.
+
+    Args:
+        tasks: List of task dictionaries
+        max_title_length: Maximum allowed title length (default: 80)
+
+    Returns:
+        list: List of tasks with long titles split into multiple tasks
+    """
+    processed_tasks = []
+
+    for task in tasks:
+        split_tasks = split_long_title_task(task, max_title_length)
+        processed_tasks.extend(split_tasks)
+
+    return processed_tasks
+
+
+def parse_data_from_pdf_local(pdf_path, use_cache=True, move_after_processing=True):
+    """
+    Process a PDF using LOCAL parsing functions to extract and structure data.
+
+    This function uses pdfplumber to extract text and tables, then processes
+    them locally without relying on external AI APIs.
+
+    Args:
+        pdf_path: Path to the PDF file
+        use_cache: Whether to check/use cached results (default: True)
+        move_after_processing: Whether to move PDF to processed folder after extraction (default: True)
+
+    Returns:
+        list: List of dictionaries containing output data with keys:
+            - Title: Generated title for the tire group
+            - Model: Extracted model from PDF
+            - Tyre_Width: Extracted tire width
+            - Tyre_dia: Extracted tire diameter
+            - holes: Number of holes from first table
+            - pcd: PCD value from first table
+            - centre_bore: Centre bore value from first table
+            - offset: Offset value from first table
+            - tire_size: Formatted tire size string
+    """
+    pdf_filename = os.path.basename(pdf_path)
+
+    # Check cache first if enabled
+    if use_cache:
+        cached_data = get_cached_result(pdf_filename)
+        if cached_data is not None:
+            return cached_data
+
+    # Step 1: Process PDF to extract text and tables
+    all_text, first_table_data, merged_csv_path = process_pdf(pdf_path)
+
+    # Step 2: Extract wheel model from text
+    model = extract_model_from_text(all_text)
+
+    # Step 3: Extract wheel size and tyre dimensions from text
+    wheel_size_formatted, tyre_width, tyre_dia = extract_wheel_size_from_text(all_text)
+
+    # Step 4: Extract wheel specifications from first table
+    wheel_specs = extract_wheel_specs_from_first_table(first_table_data)
+
+    output_data = []
+
+    # Step 5: Process vehicle compatibility data if merged CSV exists
+    if merged_csv_path and os.path.exists(merged_csv_path):
+        try:
+            # Get grouped data by manufacturer and tire size
+            valid_groups = get_valid_tire_groups(merged_csv_path)
+
+            for group in valid_groups:
+                data_item = {
+                    'Title': group['title'],
+                    'Model': model,
+                    'Tyre_Width': tyre_width,
+                    'Tyre_dia': tyre_dia,
+                    'holes': wheel_specs['holes'],
+                    'pcd': wheel_specs['pcd'],
+                    'centre_bore': wheel_specs['centre_bore'],
+                    'offset': wheel_specs['offset'],
+                    'tire_size': group['tire_size']
+                }
+
+                # Validate the extracted data
+                is_valid, validation_errors = validate_extracted_data(data_item)
+                if is_valid:
+                    output_data.append(data_item)
+                else:
+                    print(f"Validation failed for group: {validation_errors}")
+
+            # Clean up merged CSV after processing
+            try:
+                os.remove(merged_csv_path)
+            except OSError:
+                pass
+
+        except Exception as e:
+            print(f"Error processing merged CSV: {e}")
+
+    # If no groups were created from CSV, create a single entry
+    if not output_data:
+        # Create a default entry with available data
+        data_item = {
+            'Title': f"{tyre_dia} Inch All-season Complete Wheels set" if tyre_dia else None,
+            'Model': model,
+            'Tyre_Width': tyre_width,
+            'Tyre_dia': tyre_dia,
+            'holes': wheel_specs['holes'],
+            'pcd': wheel_specs['pcd'],
+            'centre_bore': wheel_specs['centre_bore'],
+            'offset': wheel_specs['offset'],
+            'tire_size': None
+        }
+
+        # Validate and add if valid
+        is_valid, validation_errors = validate_extracted_data(data_item)
+        if is_valid:
+            output_data.append(data_item)
+        else:
+            print(f"Default entry validation failed: {validation_errors}")
+            # Add anyway but mark with validation issues
+            data_item['_validation_errors'] = validation_errors
+            output_data.append(data_item)
+
+    # Step 6: Split tasks with long titles (>80 characters)
+    output_data = process_tasks_with_title_splitting(output_data, max_title_length=80)
+
+    # Cache the results
+    if output_data:
+        cache_result(pdf_filename, output_data, pdf_path)
+
+        # Move PDF to processed folder after successful extraction
+        if move_after_processing:
+            move_to_processed(pdf_path)
+
+    return output_data
+
+
+def parse_data_from_pdf(pdf_path, use_cache=True, move_after_processing=True, use_ai=False):
+    """
+    Process a PDF to extract and structure data.
+
+    This function can use either local parsing or AI-powered extraction.
+    By default, it uses local parsing for faster and more reliable results.
+
+    Args:
+        pdf_path: Path to the PDF file
+        use_cache: Whether to check/use cached results (default: True)
+        move_after_processing: Whether to move PDF to processed folder after extraction (default: True)
+        use_ai: Whether to use AI extraction instead of local parsing (default: False)
+
+    Returns:
+        list: List of dictionaries containing output data with keys:
+            - Title: Generated title for the tire group
+            - Model: Extracted model from PDF
+            - Tyre_Width: Extracted tire width
+            - Tyre_dia: Extracted tire diameter
+            - holes: Number of holes from first table
+            - pcd: PCD value from first table
+            - centre_bore: Centre bore value from first table
+            - offset: Offset value from first table
+            - tire_size: Formatted tire size string
+    """
+    if use_ai:
+        # Use AI-powered extraction
+        return parse_data_from_pdf_ai(pdf_path, use_cache, move_after_processing)
+    else:
+        # Use local parsing (default)
+        return parse_data_from_pdf_local(pdf_path, use_cache, move_after_processing)
+
+
+def parse_data_from_pdf_ai(pdf_path, use_cache=True, move_after_processing=True):
     """
     Process a PDF using AI to extract and structure data.
 
@@ -967,6 +1357,14 @@ def parse_data_from_pdf(pdf_path, use_cache=True, move_after_processing=True):
             if key not in item:
                 item[key] = None
 
+        # Validate the extracted data
+        is_valid, validation_errors = validate_extracted_data(item)
+        if not is_valid:
+            print(f"AI extraction validation warning: {validation_errors}")
+
+    # Split tasks with long titles (>80 characters)
+    output_data = process_tasks_with_title_splitting(output_data, max_title_length=80)
+
     # Cache the results
     if output_data:
         cache_result(pdf_filename, output_data, pdf_path)
@@ -1007,6 +1405,20 @@ def validate_task(task):
 
 if __name__ == "__main__":
     file_path = r"D:\fiverr\Automation\pdf_to_website\documents\1-HA-B32-9.5x19-5x112-ET48-D3-66.6.pdf"
-    output_data = parse_data_from_pdf(file_path)
-    print(output_data)
+
+    # Test local parsing (default, no AI)
+    print("=" * 50)
+    print("Testing LOCAL parsing (no AI):")
+    print("=" * 50)
+    output_data = parse_data_from_pdf(file_path, use_cache=False, move_after_processing=False, use_ai=False)
+    for item in output_data:
+        print(json.dumps(item, indent=2, ensure_ascii=False))
+
+    # Uncomment below to test AI parsing
+    # print("\n" + "=" * 50)
+    # print("Testing AI parsing:")
+    # print("=" * 50)
+    # output_data_ai = parse_data_from_pdf(file_path, use_cache=False, move_after_processing=False, use_ai=True)
+    # for item in output_data_ai:
+    #     print(json.dumps(item, indent=2, ensure_ascii=False))
 

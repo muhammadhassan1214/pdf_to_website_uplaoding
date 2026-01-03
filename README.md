@@ -23,10 +23,22 @@ This automation tool extracts data from PDF documents (German ABE - Allgemeine B
 This tool automates the following tasks:
 
 1. **PDF Processing**: Reads PDF files containing wheel/tire specifications
-2. **AI Data Extraction**: Uses OpenAI to intelligently extract and structure data from PDFs
-3. **Web Automation**: Automatically logs into a website and creates tire/wheel products
-4. **Brand Matching**: Searches for matching premium and budget tire brands
-5. **Product Creation**: Generates product listings with proper titles and specifications
+2. **Data Extraction**: Uses local parsing functions to extract and structure data from PDFs (with optional AI fallback)
+3. **Data Validation**: Validates extracted data to ensure quality (e.g., title must start with a number)
+4. **Web Automation**: Automatically logs into a website and creates tire/wheel products
+5. **Brand Matching**: Searches for matching premium and budget tire brands
+6. **Product Creation**: Generates product listings with proper titles and specifications
+
+### Parsing Methods
+
+The tool supports two parsing methods:
+
+| Method | Description | Speed | Cost |
+|--------|-------------|-------|------|
+| **Local Parsing** (Default) | Uses pdfplumber to extract text/tables, processes locally | Fast | Free |
+| **AI Parsing** (Optional) | Uses OpenAI API for intelligent extraction | Slower | API costs |
+
+By default, the tool uses **local parsing** which is faster and doesn't require API calls.
 
 ---
 
@@ -44,7 +56,7 @@ Before you start, make sure you have:
 
 ### Accounts Required
 
-- **OpenAI API Account**: You need an API key from [OpenAI](https://platform.openai.com/api-keys)
+- **OpenAI API Account** (Optional): Only needed if using AI parsing. Get an API key from [OpenAI](https://platform.openai.com/api-keys)
 - **Website Login Credentials**: Username and password for the target website
 
 ---
@@ -147,15 +159,20 @@ The `.env` file stores your secret credentials. Create or edit this file in the 
 
 **File contents**:
 ```env
-# OpenAI API Key (Get it from https://platform.openai.com/api-keys)
+# OpenAI API Key (Optional - only needed if using AI parsing)
+# Get it from https://platform.openai.com/api-keys
 OPENAI_API_KEY=sk-your-api-key-here
 
-# Website Login Credentials
+# Website Login Credentials (Required)
 LOGIN_USERNAME=your-email@example.com
 LOGIN_PASSWORD=your-password-here
 ```
 
-### Step 2: Get Your OpenAI API Key
+### Step 2: Get Your OpenAI API Key (Optional)
+
+⚠️ **Note**: This step is only needed if you want to use AI parsing instead of local parsing.
+
+By default, the tool uses **local parsing** which doesn't require an API key.
 
 1. Go to [platform.openai.com](https://platform.openai.com/)
 2. Sign up or log in
@@ -215,8 +232,16 @@ After the script finishes:
          │
          ▼
 ┌─────────────────┐
-│  AI Extracts    │
-│  Data from PDF  │
+│ Local Parsing   │
+│ Extracts Data   │
+│ (or AI if set)  │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  Data Validated │
+│ (Title starts   │
+│  with number)   │
 └────────┬────────┘
          │
          ▼
@@ -330,6 +355,27 @@ Stores extracted PDF data so you don't need to re-process the same PDFs.
 }
 ```
 
+**Each task in the data array has this structure**:
+```json
+{
+  "Title": "19 Inch All-season Complete Wheels set for Mercedes-Benz E63, E63S AMG T-Modell",
+  "Model": "B32",
+  "Tyre_Width": 9.5,
+  "Tyre_dia": 19,
+  "holes": "5",
+  "pcd": "112",
+  "centre_bore": "66.6",
+  "offset": "48",
+  "tire_size": "265/40R19"
+}
+```
+
+**Data Validation Rules**:
+- Title must start with a number (e.g., "19 Inch...")
+- All required fields (Model, Tyre_Width, Tyre_dia, holes, pcd, centre_bore, offset, tire_size) must be present
+- Invalid entries are logged but still included (with a `_validation_errors` field)
+```
+
 ### `processed_tasks.json` (Processing Log)
 Records what happened with each processed task.
 
@@ -387,5 +433,5 @@ deactivate
 
 ---
 
-**Last Updated**: December 31, 2025
+**Last Updated**: January 2, 2026
 

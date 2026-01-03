@@ -6,7 +6,7 @@ from selenium.webdriver.common.by import By
 from script.utils.functions import (
     create_xpath, get_pdf_paths, get_season,
     parse_data_from_pdf, validate_task, format_tire_size,
-    load_cache, move_task_to_processed
+    load_cache, move_task_to_processed, process_tasks_with_title_splitting
 )
 from script.utils.utils import (
     get_normal_driver, safe_navigate_to_url,
@@ -19,8 +19,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv()
 base_url = 'http://82.165.174.94'
 task_list = []
-premium_brands = ['CONTINENTAL', 'GOODYEAR', 'HANKOOK']
+
 cheap_brands = ['ARIVO', 'GOODRIDE', 'WESTLAKE']
+premium_brands = ['CONTINENTAL', 'GOODYEAR', 'HANKOOK']
 seasons = ['Sommerreifen', 'Winterreifen', 'Ganzjahresreifen']
 
 def login(driver):
@@ -97,6 +98,10 @@ def main():
                 for pdf_filename, cache_entry in cache.items():
                     cached_data = cache_entry.get('data', [])
                     logger.info(f"Loading {len(cached_data)} cached items from {pdf_filename}")
+
+                    # Apply title splitting to cached data (in case it wasn't split during caching)
+                    cached_data = process_tasks_with_title_splitting(cached_data, max_title_length=80)
+                    logger.info(f"After title splitting: {len(cached_data)} items from {pdf_filename}")
 
                     # Validate and filter cached tasks
                     valid_tasks = []
