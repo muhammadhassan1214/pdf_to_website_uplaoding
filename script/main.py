@@ -1,3 +1,18 @@
+"""
+PDF to Website Automation - Main Entry Point
+
+This module serves as the main entry point for the automation script.
+It can be run in two modes:
+1. GUI Mode (default): Run via run.bat or `python -m script.gui`
+2. CLI Mode: Run directly with `python -m script.main`
+
+For GUI mode, use the run.bat file or execute:
+    python -m script.gui
+
+For CLI mode (legacy), run:
+    python -m script.main
+"""
+
 import os
 import time
 
@@ -6,7 +21,8 @@ from selenium.webdriver.common.by import By
 from script.utils.functions import (
     create_xpath, get_pdf_paths, get_season,
     parse_data_from_pdf, validate_task, format_tire_size,
-    load_cache, move_task_to_processed, process_tasks_with_title_splitting
+    load_cache, move_task_to_processed, process_tasks_with_title_splitting,
+    delete_cache_file
 )
 from script.utils.utils import (
     get_normal_driver, safe_navigate_to_url,
@@ -62,18 +78,25 @@ def no_result_found(driver):
 
 def main():
     try:
+        # Delete cache file for fresh run
+        delete_cache_file()
+
         pdf_dir = os.path.join(BASE_DIR, '..', 'documents')
         if not os.path.exists(pdf_dir):
-            logger.error(f"Das PDF-Verzeichnis existiert nicht: {pdf_dir}")
+            logger.error(f"PDF directory not found: {pdf_dir}")
             return
         all_files = get_pdf_paths(pdf_dir)
-        logger.info(f"Gefundene PDF-Dateien: {all_files}")
+        logger.info(f"Found {len(all_files)} PDF file(s)")
 
         # parse_data_from_pdf returns a list of dictionaries for each PDF
         for file in all_files:
             pdf_filename = os.path.basename(file)
+            logger.info(f"Processing: {pdf_filename}")
             file_data_list = parse_data_from_pdf(file)
-            logger.info(f"Extracted {len(file_data_list)} items from {pdf_filename}")
+
+            if not file_data_list:
+                logger.warning(f"No valid data found in: {pdf_filename}")
+                continue
 
             # Validate and filter tasks
             valid_tasks = []
@@ -83,57 +106,53 @@ def main():
                     # Add source PDF filename to track origin
                     task['_source_pdf'] = pdf_filename
                     valid_tasks.append(task)
-                else:
-                    logger.warning(f"Skipping invalid task from {pdf_filename}: missing fields {missing}")
 
             # Extend task_list with valid items from each PDF
-            task_list.extend(valid_tasks)
-            logger.info(f"Added {len(valid_tasks)} valid tasks from {pdf_filename}")
+            if valid_tasks:
+                task_list.extend(valid_tasks)
+                logger.info(f"  → {len(valid_tasks)} valid task(s) extracted")
+            else:
+                logger.warning(f"  → No valid matches found in: {pdf_filename}")
 
         # If no new PDFs found, load from cache
         if not all_files:
-            logger.info("No new PDF files found in documents folder. Loading from cache...")
+            logger.info("No PDFs in documents folder. Checking cache...")
             cache = load_cache()
             if cache:
                 for pdf_filename, cache_entry in cache.items():
+                    logger.info(f"Loading from cache: {pdf_filename}")
                     cached_data = cache_entry.get('data', [])
-                    logger.info(f"Loading {len(cached_data)} cached items from {pdf_filename}")
 
-                    # Apply title splitting to cached data (in case it wasn't split during caching)
+                    # Apply title splitting to cached data
                     cached_data = process_tasks_with_title_splitting(cached_data, max_title_length=80)
-                    logger.info(f"After title splitting: {len(cached_data)} items from {pdf_filename}")
 
                     # Validate and filter cached tasks
                     valid_tasks = []
                     for task in cached_data:
                         is_valid, missing = validate_task(task)
                         if is_valid:
-                            # Add source PDF filename to track origin
                             task['_source_pdf'] = pdf_filename
                             valid_tasks.append(task)
-                        else:
-                            logger.warning(f"Skipping invalid cached task from {pdf_filename}: missing fields {missing}")
 
-                    task_list.extend(valid_tasks)
-                    logger.info(f"Added {len(valid_tasks)} valid tasks from cache ({pdf_filename})")
+                    if valid_tasks:
+                        task_list.extend(valid_tasks)
+                        logger.info(f"  → {len(valid_tasks)} valid task(s) from cache")
+                    else:
+                        logger.warning(f"  → No valid matches in cached: {pdf_filename}")
             else:
-                logger.info("No cached data found.")
+                logger.info("No cached data available.")
 
-        logger.info(f"Total tasks to process: {len(task_list)}")
+        logger.info(f"Total tasks: {len(task_list)}")
 
         if not task_list:
             logger.warning("No valid tasks found. Exiting.")
             return
 
-        # Log a summary of all tasks before processing
-        logger.info("=" * 50)
-        logger.info("TASK SUMMARY:")
+        # Log brief task summary
+        logger.info("-" * 40)
         for i, task in enumerate(task_list, 1):
-            logger.info(f"  Task {i}: {task.get('Title', 'No Title')[:60]}...")
-            logger.info(f"    Model: {task.get('Model')}, Size: {task.get('Tyre_dia')}, "
-                       f"Holes: {task.get('holes')}, PCD: {task.get('pcd')}, "
-                       f"Offset: {task.get('offset')}, Centre Bore: {task.get('centre_bore')}")
-        logger.info("=" * 50)
+            logger.info(f"Task {i}: {task.get('Title', 'No Title')[:50]}...")
+        logger.info("-" * 40)
 
         driver = get_normal_driver()
         login(driver)
@@ -268,4 +287,14 @@ def main():
 
 
 if __name__ == "__main__":
+    print("=" * 50)
+    print("PDF to Website Automation - CLI Mode")
+    print("=" * 50)
+    print()
+    print("TIP: For GUI mode with better controls, use:")
+    print("     - Double-click 'run.bat'")
+    print("     - Or run: python -m script.gui")
+    print()
+    print("Starting CLI mode processing...")
+    print()
     main()

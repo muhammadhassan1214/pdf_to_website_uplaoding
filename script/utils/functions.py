@@ -160,6 +160,25 @@ def clear_cache():
     print("Cache cleared")
 
 
+def delete_cache_file():
+    """
+    Delete the cache JSON file completely.
+    Called at the start of each run to ensure fresh processing.
+
+    Returns:
+        bool: True if file was deleted, False if it didn't exist
+    """
+    if os.path.exists(CACHE_FILE_PATH):
+        try:
+            os.remove(CACHE_FILE_PATH)
+            print("Cache file deleted for fresh run")
+            return True
+        except OSError as e:
+            print(f"Warning: Could not delete cache file: {e}")
+            return False
+    return False
+
+
 def get_all_cached_files():
     """
     Get a list of all cached PDF filenames.

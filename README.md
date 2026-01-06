@@ -126,6 +126,8 @@ This installs:
 ```
 pdf_to_website/
 │
+├── run.bat                       # 🚀 DOUBLE-CLICK TO START THE APPLICATION
+│
 ├── documents/                    # 📥 PUT YOUR PDF FILES HERE
 │   └── (your PDF files)
 │
@@ -133,7 +135,9 @@ pdf_to_website/
 │   └── (processed PDFs)
 │
 ├── script/                       # 🔧 Main script folder
-│   ├── main.py                   # Main automation script
+│   ├── gui.py                    # GUI application (tkinter)
+│   ├── main_processor.py         # Core processing logic
+│   ├── main.py                   # CLI mode entry point
 │   ├── __init__.py
 │   └── utils/
 │       ├── functions.py          # PDF processing & AI functions
@@ -186,12 +190,40 @@ By default, the tool uses **local parsing** which doesn't require an API key.
 
 ## 🚀 How to Use
 
-### Step 1: Prepare Your PDF Files
+### Option 1: GUI Mode (Recommended for Beginners)
 
-1. Place your PDF files in the `documents/` folder
-2. Make sure the PDFs are German ABE (wheel certification) documents
+The easiest way to use this tool is through the graphical user interface (GUI).
 
-### Step 2: Activate Virtual Environment
+#### Step 1: Start the Application
+
+**Simply double-click the `run.bat` file** in the project folder.
+
+This will open a window with:
+- **PDF Path field**: Select a specific PDF or leave empty to process all PDFs
+- **Browse button**: Click to select a PDF file
+- **Start button**: Click to begin processing
+- **Stop button**: Click to stop processing at any time
+- **Log area**: Shows detailed progress messages
+
+#### Step 2: Select PDF (Optional)
+
+- **To process a specific PDF**: Click "Browse..." and select your file
+- **To process all PDFs**: Leave the path field empty (will process all PDFs from `documents/` folder)
+
+#### Step 3: Start Processing
+
+1. Click the **"▶ Start Processing"** button
+2. A Chrome browser will open automatically
+3. Watch the progress in the log area
+4. Wait for completion or click **"■ Stop"** to cancel
+
+---
+
+### Option 2: CLI Mode (For Advanced Users)
+
+If you prefer command line:
+
+#### Step 1: Activate Virtual Environment
 
 Open Command Prompt and run:
 
@@ -200,20 +232,20 @@ cd D:\fiverr\Automation\pdf_to_website
 venv\Scripts\activate
 ```
 
-### Step 3: Run the Script
+#### Step 2: Run the Script
 
 ```bash
 python -m script.main
 ```
 
-### Step 4: Watch the Automation
+---
 
-- A Chrome browser window will open automatically
-- The script will log in to the website
-- It will process each PDF and create products
-- Watch the terminal for progress messages
+### Both Modes: Prepare Your PDF Files First
 
-### Step 5: Check Results
+1. Place your PDF files in the `documents/` folder
+2. Make sure the PDFs are German ABE (wheel certification) documents
+
+### Check Results After Processing
 
 After the script finishes:
 - Processed PDFs are moved to `processed_documents/`
