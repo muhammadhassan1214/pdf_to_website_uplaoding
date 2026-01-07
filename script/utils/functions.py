@@ -29,6 +29,26 @@ PROCESSED_DOCS_FOLDER = os.path.join(os.path.dirname(os.path.dirname(os.path.dir
 # Rate Limiting Functions
 # ============================================
 
+def format_tyre_width(value):
+    """
+    Format tyre width to be an int if it's a whole number, otherwise keep as float.
+
+    Args:
+        value: The tyre width value (int, float, or None)
+
+    Returns:
+        int if value is a whole number (e.g., 8.0 -> 8), float otherwise (e.g., 8.5 -> 8.5), or None
+    """
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        # Check if it's a whole number
+        if float(value) == int(value):
+            return int(value)
+        return float(value)
+    return value
+
+
 def wait_for_rate_limit():
     """
     Enforce rate limiting between API calls.
@@ -123,6 +143,12 @@ def cache_result(pdf_filename, data, source_path):
         data: Extracted data to cache
         source_path: Original path of the PDF file
     """
+    # Format Tyre_Width for each data item before caching
+    if isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict) and 'Tyre_Width' in item:
+                item['Tyre_Width'] = format_tyre_width(item['Tyre_Width'])
+
     cache = load_cache()
     cache[pdf_filename] = {
         'data': data,
@@ -434,7 +460,7 @@ def extract_wheel_size_from_text(pdf_text):
         tyre_width = None
         if width_match:
             width_str = width_match.group(1).replace(',', '.')
-            tyre_width = float(width_str)
+            tyre_width = format_tyre_width(float(width_str))
 
         # Extract inch size from wheel size (e.g., "8,5Jx19H2" -> 19)
         inch_match = re.search(r'Jx(\d+)', wheel_size)
@@ -916,19 +942,28 @@ Return ONLY a valid JSON array with the extracted data. No additional text or ex
         parsed_response = json.loads(response_content)
 
         # Handle both array response and object with 'data' key
+        result_data = None
         if isinstance(parsed_response, list):
-            return parsed_response
+            result_data = parsed_response
         elif isinstance(parsed_response, dict):
             # Check if it's wrapped in a key like 'data' or 'results'
             if 'data' in parsed_response:
-                return parsed_response['data']
+                result_data = parsed_response['data']
             elif 'results' in parsed_response:
-                return parsed_response['results']
+                result_data = parsed_response['results']
             else:
                 # It's a single object, wrap in list
-                return [parsed_response]
+                result_data = [parsed_response]
+        else:
+            result_data = parsed_response
 
-        return parsed_response
+        # Post-process Tyre_Width to ensure correct format (int vs float)
+        if isinstance(result_data, list):
+            for item in result_data:
+                if isinstance(item, dict) and 'Tyre_Width' in item:
+                    item['Tyre_Width'] = format_tyre_width(item['Tyre_Width'])
+
+        return result_data
 
     except json.JSONDecodeError as e:
         print(f"Error parsing AI response: {e}")
