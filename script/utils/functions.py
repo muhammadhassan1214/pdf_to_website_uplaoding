@@ -740,7 +740,7 @@ def filter_and_group_by_manufacturer_and_tire_size(csv_path):
         else:
             models_str = clean_model_names[0] if clean_model_names else ''
 
-        title = f"{inch_size} Inch All-season Complete Wheels set for {manufacturer} {models_str}"
+        title = f"{inch_size} Inch All-season Complete Wheels suitable for {manufacturer} {models_str}"
 
         results[(manufacturer, tire_size)] = {
             'manufacturer': manufacturer,
@@ -1436,7 +1436,6 @@ def format_tire_size(tire_string):
     return re.sub(r'(\d)([a-zA-Z])', r'\1 \2', tire_string)
 
 def get_season(season: str) -> str:
-    season = season.lower()
     if 'Sommerreifen' == season:
         return 'Summer'
     elif 'Winterreifen' == season:

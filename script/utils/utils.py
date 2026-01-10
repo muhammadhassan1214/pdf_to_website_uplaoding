@@ -99,9 +99,8 @@ def input_element(driver, by_locator, text):
     element = WebDriverWait(driver, 10).until(EC.element_to_be_clickable(by_locator))
     driver.execute_script(
         "arguments[0].scrollIntoView({behavior: 'smooth', block: 'center', inline: 'nearest'})", element)
-    WebDriverWait(driver, 10).until(EC.visibility_of_element_located(by_locator)).send_keys(Keys.CONTROL, '\A',
-                                                                                                 '\b')
-    WebDriverWait(driver, 10).until(EC.visibility_of_element_located(by_locator)).send_keys(text)
+    element.clear()
+    element.send_keys(text)
 
 
 def select_dropdown_by_text(driver, by_locator, text):
