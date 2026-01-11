@@ -1081,7 +1081,7 @@ def validate_extracted_data(data_item):
     return len(errors) == 0, errors
 
 
-def split_long_title_task(task, max_length=80):
+def split_long_title_task(task, max_length=80, min_models_to_split=3):
     """
     Split a task with a long title into multiple tasks with shorter titles.
 
@@ -1089,13 +1089,15 @@ def split_long_title_task(task, max_length=80):
     "{size} Inch All-season Complete Wheels set for {Manufacturer} {Model1}, {Model2}, ..."
 
     This function splits the models into groups that fit within the max_length limit.
+    Only splits if there are at least min_models_to_split models in the title.
 
     Args:
         task: Dictionary containing task data with a 'Title' key
         max_length: Maximum allowed title length (default: 80)
+        min_models_to_split: Minimum number of models required to split (default: 3)
 
     Returns:
-        list: List of tasks (original if title <= max_length, or split tasks)
+        list: List of tasks (original if title <= max_length or less than min_models_to_split models, or split tasks)
     """
     title = task.get('Title')
 
@@ -1146,6 +1148,10 @@ def split_long_title_task(task, max_length=80):
     if not models:
         return [task]
 
+    # Only split if there are at least min_models_to_split models
+    if len(models) < min_models_to_split:
+        return [task]
+
     # Group models to fit within max_length
     split_tasks = []
     current_models = []
@@ -1190,13 +1196,14 @@ def split_long_title_task(task, max_length=80):
     return split_tasks if split_tasks else [task]
 
 
-def process_tasks_with_title_splitting(tasks, max_title_length=80):
+def process_tasks_with_title_splitting(tasks, max_title_length=80, min_models_to_split=3):
     """
     Process a list of tasks and split any tasks with titles exceeding max_title_length.
 
     Args:
         tasks: List of task dictionaries
         max_title_length: Maximum allowed title length (default: 80)
+        min_models_to_split: Minimum number of models required to split (default: 3)
 
     Returns:
         list: List of tasks with long titles split into multiple tasks
@@ -1204,7 +1211,7 @@ def process_tasks_with_title_splitting(tasks, max_title_length=80):
     processed_tasks = []
 
     for task in tasks:
-        split_tasks = split_long_title_task(task, max_title_length)
+        split_tasks = split_long_title_task(task, max_title_length, min_models_to_split)
         processed_tasks.extend(split_tasks)
 
     return processed_tasks
