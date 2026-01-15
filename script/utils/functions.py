@@ -205,6 +205,97 @@ def delete_cache_file():
     return False
 
 
+def remove_duplicate_tasks_from_cache():
+    """
+    Verify and remove duplicate tasks from the cache file.
+    A task is considered duplicate if it has the same Title, Model, Tyre_Width,
+    Tyre_dia, holes, pcd, centre_bore, offset, and tire_size.
+
+    This function should be called before running web automation to ensure
+    no duplicate tasks are processed.
+
+    Returns:
+        tuple: (total_removed, details) where details is a dict with removal info per PDF
+    """
+    cache = load_cache()
+    if not cache:
+        print("Cache is empty, no duplicates to remove.")
+        return 0, {}
+
+    total_removed = 0
+    removal_details = {}
+
+    # Track all unique tasks across all PDFs to find cross-file duplicates
+    seen_tasks = set()
+
+    for pdf_filename, cache_entry in list(cache.items()):
+        tasks = cache_entry.get('data', [])
+        if not tasks:
+            continue
+
+        unique_tasks = []
+        duplicates_in_file = 0
+
+        for task in tasks:
+            # Create a hashable key from task's identifying fields
+            task_key = create_task_key(task)
+
+            if task_key not in seen_tasks:
+                seen_tasks.add(task_key)
+                unique_tasks.append(task)
+            else:
+                duplicates_in_file += 1
+                total_removed += 1
+
+        if duplicates_in_file > 0:
+            removal_details[pdf_filename] = duplicates_in_file
+            print(f"Removed {duplicates_in_file} duplicate task(s) from '{pdf_filename}'")
+
+        # Update cache entry with unique tasks only
+        if unique_tasks:
+            cache[pdf_filename]['data'] = unique_tasks
+        else:
+            # If all tasks were duplicates, remove the PDF entry entirely
+            del cache[pdf_filename]
+            print(f"Removed '{pdf_filename}' from cache (all tasks were duplicates)")
+
+    # Save the cleaned cache
+    save_cache(cache)
+
+    if total_removed > 0:
+        print(f"Total duplicate tasks removed: {total_removed}")
+    else:
+        print("No duplicate tasks found in cache.")
+
+    return total_removed, removal_details
+
+
+def create_task_key(task):
+    """
+    Create a hashable key from a task dictionary for duplicate detection.
+    Uses the main identifying fields of a task.
+
+    Args:
+        task: Task dictionary
+
+    Returns:
+        tuple: Hashable key representing the task's unique identity
+    """
+    # Fields that identify a unique task
+    key_fields = ['Title', 'Model', 'Tyre_Width', 'Tyre_dia', 'holes', 'pcd', 'centre_bore', 'offset', 'tire_size']
+
+    key_values = []
+    for field in key_fields:
+        value = task.get(field)
+        # Convert to string for consistent comparison
+        if value is not None:
+            key_values.append(str(value))
+        else:
+            key_values.append('')
+
+    return tuple(key_values)
+
+
 def get_all_cached_files():
     """
     Get a list of all cached PDF filenames.
@@ -740,7 +831,7 @@ def filter_and_group_by_manufacturer_and_tire_size(csv_path):
         else:
             models_str = clean_model_names[0] if clean_model_names else ''
 
-        title = f"{inch_size} Inch All-season Complete Wheels suitable for {manufacturer} {models_str}"
+        title = f"{inch_size}-Zoll All-season Kompletträder für {manufacturer} {models_str}"
 
         results[(manufacturer, tire_size)] = {
             'manufacturer': manufacturer,
@@ -1444,11 +1535,11 @@ def format_tire_size(tire_string):
 
 def get_season(season: str) -> str:
     if 'Sommerreifen' == season:
-        return 'Summer'
+        return 'Sommer'
     elif 'Winterreifen' == season:
         return 'Winter'
     elif 'Ganzjahresreifen' == season:
-        return 'All-season'
+        return 'Allwetter'
     else:
         return 'Unknown'
 

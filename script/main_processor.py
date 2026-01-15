@@ -9,7 +9,7 @@ import os
 from script.utils.functions import (
     get_pdf_paths, parse_data_from_pdf, validate_task,
     load_cache, move_task_to_processed, process_tasks_with_title_splitting,
-    delete_cache_file
+    delete_cache_file, remove_duplicate_tasks_from_cache
 )
 from script.utils.utils import get_normal_driver, logger
 from script.utils.automation import (
@@ -124,6 +124,31 @@ def run_automation(pdf_path=None, gui_callback=None, stop_checker=None, driver_s
         if not task_list:
             log_message("No valid tasks found. Exiting.", gui_callback)
             return False
+
+        # Remove duplicate tasks from cache before processing
+        duplicates_removed, removal_details = remove_duplicate_tasks_from_cache()
+        if duplicates_removed > 0:
+            log_message(f"Removed {duplicates_removed} duplicate task(s) from cache", gui_callback)
+            # Reload task list to exclude duplicates
+            seen_task_keys = set()
+            unique_task_list = []
+            for task in task_list:
+                key = (
+                    str(task.get('Title', '')),
+                    str(task.get('Model', '')),
+                    str(task.get('Tyre_Width', '')),
+                    str(task.get('Tyre_dia', '')),
+                    str(task.get('holes', '')),
+                    str(task.get('pcd', '')),
+                    str(task.get('centre_bore', '')),
+                    str(task.get('offset', '')),
+                    str(task.get('tire_size', ''))
+                )
+                if key not in seen_task_keys:
+                    seen_task_keys.add(key)
+                    unique_task_list.append(task)
+            task_list = unique_task_list
+            log_message(f"Tasks after deduplication: {len(task_list)}", gui_callback)
 
         # Log brief task summary
         log_message("-" * 40, gui_callback)
