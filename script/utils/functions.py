@@ -831,7 +831,7 @@ def filter_and_group_by_manufacturer_and_tire_size(csv_path):
         else:
             models_str = clean_model_names[0] if clean_model_names else ''
 
-        title = f"{inch_size}-Zoll All-season Kompletträder für {manufacturer} {models_str}"
+        title = f"{inch_size} Zoll All-season für {manufacturer} {models_str}"
 
         results[(manufacturer, tire_size)] = {
             'manufacturer': manufacturer,
@@ -1535,11 +1535,11 @@ def format_tire_size(tire_string):
 
 def get_season(season: str) -> str:
     if 'Sommerreifen' == season:
-        return 'Sommer'
+        return 'Sommerkompletträder'
     elif 'Winterreifen' == season:
-        return 'Winter'
+        return 'Winterkompletträder'
     elif 'Ganzjahresreifen' == season:
-        return 'Allwetter'
+        return 'Ganzjahreskompletträder'
     else:
         return 'Unknown'
 
