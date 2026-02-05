@@ -9,7 +9,8 @@ import os
 from script.utils.functions import (
     get_pdf_paths, parse_data_from_pdf, validate_task,
     load_cache, move_task_to_processed, process_tasks_with_title_splitting,
-    delete_cache_file, remove_duplicate_tasks_from_cache
+    delete_cache_file, remove_duplicate_tasks_from_cache,
+    extract_reference_text_from_pdf
 )
 from script.utils.utils import get_normal_driver, logger
 from script.utils.automation import (
@@ -19,12 +20,13 @@ from script.utils.automation import (
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
-def run_automation(pdf_path=None, gui_callback=None, stop_checker=None, driver_setter=None):
+def run_automation(pdf_path=None, reference_number=None, gui_callback=None, stop_checker=None, driver_setter=None):
     """
     Main automation function that processes PDFs and automates website interactions.
 
     Args:
         pdf_path: Optional path to a specific PDF file. If None, processes all PDFs from documents folder.
+        reference_number: Optional reference number (e.g., A12) to extract text for product descriptions.
         gui_callback: Optional callback function for logging to GUI.
         stop_checker: Optional function that returns True if stop was requested.
         driver_setter: Optional callback to set driver reference in GUI for cleanup.
@@ -34,6 +36,7 @@ def run_automation(pdf_path=None, gui_callback=None, stop_checker=None, driver_s
     """
     task_list = []
     driver = None
+    reference_text = None
 
     def should_stop():
         return stop_checker() if stop_checker else False
@@ -48,6 +51,14 @@ def run_automation(pdf_path=None, gui_callback=None, stop_checker=None, driver_s
             if os.path.exists(pdf_path):
                 all_files = [pdf_path]
                 log_message(f"Processing: {os.path.basename(pdf_path)}", gui_callback)
+
+                # Extract reference text from the specific PDF if reference number is provided
+                if reference_number:
+                    reference_text = extract_reference_text_from_pdf(pdf_path, reference_number)
+                    if reference_text:
+                        log_message(f"Reference text found: {reference_text[:50]}...", gui_callback)
+                    else:
+                        log_message(f"Reference '{reference_number}' not found in PDF", gui_callback)
             else:
                 log_message(f"PDF not found: {pdf_path}", gui_callback)
                 return False
@@ -58,6 +69,14 @@ def run_automation(pdf_path=None, gui_callback=None, stop_checker=None, driver_s
                 log_message(f"PDF directory not found: {pdf_dir}", gui_callback)
                 return False
             all_files = get_pdf_paths(pdf_dir)
+
+            # For multiple PDFs, extract reference text from the first one if reference number provided
+            if reference_number and all_files:
+                reference_text = extract_reference_text_from_pdf(all_files[0], reference_number)
+                if reference_text:
+                    log_message(f"Reference text found: {reference_text[:50]}...", gui_callback)
+                else:
+                    log_message(f"Reference '{reference_number}' not found in PDF", gui_callback)
 
         log_message(f"Found {len(all_files)} PDF file(s)", gui_callback)
 
@@ -179,7 +198,7 @@ def run_automation(pdf_path=None, gui_callback=None, stop_checker=None, driver_s
             task_data = {k: v for k, v in task.items() if not k.startswith('_')}
 
             # Process task using common function
-            processing_result = process_single_task(driver, task, gui_callback, stop_checker)
+            processing_result = process_single_task(driver, task, gui_callback, stop_checker, reference_text)
 
             # Check if stop was requested during task processing
             if should_stop():

@@ -25,6 +25,7 @@ class PDFProcessorApp:
         self.processing_thread = None
         self.driver = None
         self.pdf_path = tk.StringVar()
+        self.reference_number = tk.StringVar()
 
         # Configure style
         self.style = ttk.Style()
@@ -77,6 +78,29 @@ class PDFProcessorApp:
             foreground='gray'
         )
         hint_label.pack(anchor=tk.W, pady=(5, 0))
+
+        # Reference Number Frame
+        ref_frame = ttk.LabelFrame(main_frame, text="Reference Number (Optional)", padding="10")
+        ref_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # Reference number entry
+        ref_container = ttk.Frame(ref_frame)
+        ref_container.pack(fill=tk.X)
+
+        ref_label = ttk.Label(ref_container, text="Reference:")
+        ref_label.pack(side=tk.LEFT, padx=(0, 10))
+
+        ref_entry = ttk.Entry(ref_container, textvariable=self.reference_number, width=15)
+        ref_entry.pack(side=tk.LEFT, padx=(0, 10))
+
+        # Hint label for reference
+        ref_hint_label = ttk.Label(
+            ref_frame,
+            text="Enter a reference number (e.g., A12) to append its text to product descriptions",
+            font=('Helvetica', 9, 'italic'),
+            foreground='gray'
+        )
+        ref_hint_label.pack(anchor=tk.W, pady=(5, 0))
 
         # Control Buttons Frame
         control_frame = ttk.Frame(main_frame)
@@ -241,12 +265,16 @@ class PDFProcessorApp:
             self._log_message(f"Processing specific file: {pdf_path}")
         else:
             self._log_message("Processing all PDFs from documents folder")
+
+        ref_num = self.reference_number.get().strip()
+        if ref_num:
+            self._log_message(f"Reference number: {ref_num}")
         self._log_message("=" * 50)
 
         # Start processing in a separate thread
         self.processing_thread = threading.Thread(
             target=self._run_processing,
-            args=(pdf_path,),
+            args=(pdf_path, ref_num),
             daemon=True
         )
         self.processing_thread.start()
@@ -288,7 +316,7 @@ class PDFProcessorApp:
         self.progress.stop()
         self._update_status("Ready")
 
-    def _run_processing(self, pdf_path=None):
+    def _run_processing(self, pdf_path=None, reference_number=None):
         """Run the main processing logic"""
         try:
             # Import here to avoid circular imports - use importlib for dynamic import
@@ -303,6 +331,7 @@ class PDFProcessorApp:
             # Pass the GUI instance for logging and stop checking
             result = main_processor.run_automation(
                 pdf_path=pdf_path if pdf_path else None,
+                reference_number=reference_number if reference_number else None,
                 gui_callback=self._log_message,
                 stop_checker=lambda: self.stop_requested,
                 driver_setter=self._set_driver

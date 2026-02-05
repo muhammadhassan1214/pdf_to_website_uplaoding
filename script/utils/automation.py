@@ -16,8 +16,8 @@ from script.utils.functions import (
 )
 from script.utils.utils import (
     safe_navigate_to_url, input_element, click_element, logger,
-    select_dropdown_by_text, check_element_exists,
-    wait_while_element_is_displaying
+    get_element_text, wait_while_element_is_displaying,
+    select_dropdown_by_text, check_element_exists
 )
 
 load_dotenv()
@@ -84,7 +84,7 @@ def search_product(driver, brand, season, tire_size, gui_callback=None):
         select_dropdown_by_text(driver, (By.XPATH, create_xpath('Select Usages')), season)
         input_element(driver, (By.CSS_SELECTOR, "input[placeholder= 'Enter tyre size (e.g. 205/55 R16 91 H)']"),
                       format_tire_size(tire_size))
-        input_element(driver, (By.XPATH, "(//input[@placeholder= 'Min Availability'])[2]"), '1')
+        input_element(driver, (By.XPATH, "(//input[@placeholder= 'Min Availability'])[2]"), '75')
         click_element(driver, (By.XPATH, "(//button[text()= 'Search'])[2]"))
         wait_while_element_is_displaying(driver, (By.XPATH, "//div[contains(@class, 'animate-spin')]"))
     except Exception as e:
@@ -92,7 +92,7 @@ def search_product(driver, brand, season, tire_size, gui_callback=None):
         raise
 
 
-def create_product(driver, title, season, gui_callback=None):
+def create_product(driver, title, season, gui_callback=None, reference_text=None):
     """
     Create a product on the website.
 
@@ -101,6 +101,7 @@ def create_product(driver, title, season, gui_callback=None):
         title: Product title
         season: Season type for title replacement
         gui_callback: Optional callback function for logging to GUI
+        reference_text: Optional text from PDF reference to append to product description
 
     Raises:
         Exception: If product creation fails
@@ -109,12 +110,33 @@ def create_product(driver, title, season, gui_callback=None):
         click_element(driver, (By.XPATH, "(//table)[2]/tbody/tr[1]"))
         click_element(driver, (By.XPATH, "//button[text()= 'Generate by AI']"))
         input_field_element = (By.CSS_SELECTOR, "input[placeholder= 'Enter or edit title...']")
-        input_field = check_element_exists(driver, input_field_element, timeout=10)
+        input_field = check_element_exists(driver, input_field_element, timeout=30)
         if not input_field:
             log_message("Eingabefeld für den Titel nicht gefunden.", gui_callback)
             return
         season_title = title.replace('All-season', get_season(season))
         input_element(driver, input_field_element, season_title)
+
+        # If reference text is provided, append it to the product description
+        if not reference_text:
+            try:
+                # Wait for the description field to be available
+                description_locator = (By.XPATH, "//label[text()= 'Description']/following-sibling::textarea")
+                description_field = check_element_exists(driver, description_locator, timeout=30)
+                if description_field:
+                    description_field_element = driver.find_element(*description_locator)
+                    # Get current description and append reference text
+                    current_description = get_element_text(driver, description_locator)
+                    new_description = current_description.strip()
+                    if new_description:
+                        new_description += "\n\n"
+                    new_description += reference_text
+                    # execute javascript to replace the value directly
+                    driver.execute_script("arguments[0].value = arguments[1];", description_field_element, new_description)
+                    log_message(f"Reference text appended to description", gui_callback)
+            except Exception as desc_error:
+                log_message(f"Could not append reference text: {desc_error}", gui_callback)
+
         click_element(driver, (By.XPATH, "//button[text()= 'Submit']"))
         navigate_to_rims_page(driver)
         log_message(f"Product created: {season_title[:50]}...", gui_callback)
@@ -148,7 +170,7 @@ def navigate_to_rims_page(driver, gui_callback=None):
     time.sleep(2)
 
 
-def search_rim(driver, model, tyre_dia, gui_callback=None):
+def search_rim(driver, model, tyre_dia, rim_manufacturer=None, gui_callback=None):
     """
     Search for a rim with specified parameters.
 
@@ -156,16 +178,21 @@ def search_rim(driver, model, tyre_dia, gui_callback=None):
         driver: Selenium WebDriver instance
         model: Rim model to search
         tyre_dia: Tyre diameter/size
+        rim_manufacturer: Rim manufacturer name (e.g., 'BROCK / RC', 'BBS', etc.)
+                         If None, defaults to 'BROCK / RC'
         gui_callback: Optional callback function for logging to GUI
 
     Returns:
         bool: True if rims were found, False otherwise
     """
-    select_dropdown_by_text(driver, (By.XPATH, create_xpath('Select Manufacturer')), 'BROCK / RC')
+    # Use provided manufacturer or default to 'BROCK / RC'
+    manufacturer = rim_manufacturer if rim_manufacturer else 'BROCK / RC'
+
+    select_dropdown_by_text(driver, (By.XPATH, create_xpath('Select Manufacturer')), manufacturer)
     time.sleep(2)
     select_dropdown_by_text(driver, (By.XPATH, create_xpath('Select Size')),
                             str(tyre_dia) if tyre_dia else '')
-    input_element(driver, (By.CSS_SELECTOR, "input[placeholder= 'Min Availability']"), '1')
+    input_element(driver, (By.CSS_SELECTOR, "input[placeholder= 'Min Availability']"), '75')
     input_element(driver, (By.CSS_SELECTOR, "input[placeholder= 'Rim type']"), model if model else '')
     click_element(driver, (By.XPATH, "(//button[text()= 'Search'])[1]"))
 
@@ -271,7 +298,7 @@ def is_driver_valid(driver):
         return False
 
 
-def navigate_and_select_rim(driver, model, tyre_dia, tyre_width, holes, pcd, t_offset, centre_bore, gui_callback=None):
+def navigate_and_select_rim(driver, model, tyre_dia, tyre_width, holes, pcd, t_offset, centre_bore, rim_manufacturer=None, gui_callback=None):
     """
     Navigate to rims page, search for rim and select it.
 
@@ -284,6 +311,7 @@ def navigate_and_select_rim(driver, model, tyre_dia, tyre_width, holes, pcd, t_o
         pcd: Pitch circle diameter
         t_offset: Offset value
         centre_bore: Centre bore value
+        rim_manufacturer: Rim manufacturer name (e.g., 'BROCK / RC', 'BBS', etc.)
         gui_callback: Optional callback function for logging to GUI
 
     Returns:
@@ -292,7 +320,7 @@ def navigate_and_select_rim(driver, model, tyre_dia, tyre_width, holes, pcd, t_o
     navigate_to_rims_page(driver, gui_callback)
 
     # Search for rim
-    rims_found = search_rim(driver, model, tyre_dia, gui_callback)
+    rims_found = search_rim(driver, model, tyre_dia, rim_manufacturer, gui_callback)
 
     if not rims_found:
         return False, None
@@ -306,10 +334,11 @@ def navigate_and_select_rim(driver, model, tyre_dia, tyre_width, holes, pcd, t_o
         return False, None
 
     click_element(driver, (By.XPATH, locator))
+    click_element(driver, (By.XPATH, locator))
     return True, locator
 
 
-def process_single_task(driver, task, gui_callback=None, stop_checker=None):
+def process_single_task(driver, task, gui_callback=None, stop_checker=None, reference_text=None):
     """
     Process a single task/product.
 
@@ -318,6 +347,7 @@ def process_single_task(driver, task, gui_callback=None, stop_checker=None):
         task: Task dictionary containing all task data
         gui_callback: Optional callback function for logging to GUI
         stop_checker: Optional function that returns True if stop was requested
+        reference_text: Optional text from PDF reference to append to product description
 
     Returns:
         dict: Processing result with keys: element_found, premium_created, cheap_created, error
@@ -335,6 +365,7 @@ def process_single_task(driver, task, gui_callback=None, stop_checker=None):
     centre_bore = task.get('centre_bore')
     t_offset = task.get('offset')
     tire_size = task.get('tire_size')
+    rim_manufacturer = task.get('Rim_Manufacturer')
 
     processing_result = {
         'element_found': False,
@@ -349,7 +380,7 @@ def process_single_task(driver, task, gui_callback=None, stop_checker=None):
 
         # First navigation and rim selection to verify the element exists
         success, locator = navigate_and_select_rim(
-            driver, model, tyre_dia, tyre_width, holes, pcd, t_offset, centre_bore, gui_callback
+            driver, model, tyre_dia, tyre_width, holes, pcd, t_offset, centre_bore, rim_manufacturer, gui_callback
         )
 
         if not success:
@@ -366,7 +397,7 @@ def process_single_task(driver, task, gui_callback=None, stop_checker=None):
         cheap_product_created = process_brands_with_navigation(
             driver, title, tire_size, CHEAP_BRANDS, 'cheap',
             model, tyre_dia, tyre_width, holes, pcd, t_offset, centre_bore,
-            gui_callback, stop_checker
+            rim_manufacturer, gui_callback, stop_checker, reference_text
         )
         processing_result['cheap_created'] = cheap_product_created
 
@@ -378,7 +409,7 @@ def process_single_task(driver, task, gui_callback=None, stop_checker=None):
         premium_product_created = process_brands_with_navigation(
             driver, title, tire_size, PREMIUM_BRANDS, 'premium',
             model, tyre_dia, tyre_width, holes, pcd, t_offset, centre_bore,
-            gui_callback, stop_checker
+            rim_manufacturer, gui_callback, stop_checker, reference_text
         )
         processing_result['premium_created'] = premium_product_created
 
@@ -397,7 +428,7 @@ def process_single_task(driver, task, gui_callback=None, stop_checker=None):
 
 def process_brands_with_navigation(driver, title, tire_size, brands, brand_type,
                                     model, tyre_dia, tyre_width, holes, pcd, t_offset, centre_bore,
-                                    gui_callback=None, stop_checker=None):
+                                    rim_manufacturer=None, gui_callback=None, stop_checker=None, reference_text=None):
     """
     Process a list of brands with fresh navigation for each attempt.
     Navigates to rims page and selects the rim before each brand/season search.
@@ -415,8 +446,10 @@ def process_brands_with_navigation(driver, title, tire_size, brands, brand_type,
         pcd: Pitch circle diameter
         t_offset: Offset value
         centre_bore: Centre bore value
+        rim_manufacturer: Rim manufacturer name (e.g., 'BROCK / RC', 'BBS', etc.)
         gui_callback: Optional callback function for logging to GUI
         stop_checker: Optional function that returns True if stop was requested
+        reference_text: Optional text from PDF reference to append to product description
 
     Returns:
         bool: True if a product was created, False otherwise
@@ -446,7 +479,7 @@ def process_brands_with_navigation(driver, title, tire_size, brands, brand_type,
             try:
                 # Navigate to rims page and select rim fresh for each search
                 success, locator = navigate_and_select_rim(
-                    driver, model, tyre_dia, tyre_width, holes, pcd, t_offset, centre_bore, gui_callback
+                    driver, model, tyre_dia, tyre_width, holes, pcd, t_offset, centre_bore, rim_manufacturer, gui_callback
                 )
 
                 if not success:
@@ -461,7 +494,7 @@ def process_brands_with_navigation(driver, title, tire_size, brands, brand_type,
 
                 result_element = check_element_exists(driver, (By.XPATH, "(//table)[2]/tbody/tr[1]"), timeout=2)
                 if result_element:
-                    create_product(driver, title, season, gui_callback)
+                    create_product(driver, title, season, gui_callback, reference_text)
                     log_message(f"{brand_type.capitalize()} product created: {brand} - {season} for task: {title[:50]}...", gui_callback)
                     product_created = True
                     break

@@ -201,6 +201,7 @@ The easiest way to use this tool is through the graphical user interface (GUI).
 This will open a window with:
 - **PDF Path field**: Select a specific PDF or leave empty to process all PDFs
 - **Browse button**: Click to select a PDF file
+- **Reference Number field** (Optional): Enter a reference code (e.g., A12) to look up additional text from the PDF
 - **Start button**: Click to begin processing
 - **Stop button**: Click to stop processing at any time
 - **Log area**: Shows detailed progress messages
@@ -209,6 +210,16 @@ This will open a window with:
 
 - **To process a specific PDF**: Click "Browse..." and select your file
 - **To process all PDFs**: Leave the path field empty (will process all PDFs from `documents/` folder)
+
+#### Step 2.5: Enter Reference Number (Optional)
+
+If your PDF contains reference codes (like A12, B5, etc.) with associated text descriptions:
+
+1. Enter the reference number in the **Reference** field (e.g., `A12`)
+2. The tool will search for this reference in the PDF
+3. If found, the corresponding text (e.g., "Die Verwendung von Schneeketten ist nicht zulässig.") will be appended to the product description during web automation
+
+**Example**: If your PDF contains "A12 Die Verwendung von Schneeketten ist nicht zulässig." and you enter `A12`, this text will be automatically added to every product description created from that PDF.
 
 #### Step 3: Start Processing
 

@@ -15,6 +15,121 @@ load_dotenv()
 # Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# Rim Manufacturers list for PDF text matching
+RIM_MANUFACTURERS = [
+    "1000 MIGLIA",
+    "2DRV by WHEELWORLD",
+    "ADVANTI RACING",
+    "AEZ",
+    "ALUSTAR/EX.LINE",
+    "ALUTEC",
+    "ANTERA",
+    "ANZIO",
+    "ARBEX",
+    "ARCASTING",
+    "ARCEO WHEELS",
+    "ARTEC",
+    "ASA",
+    "ATS",
+    "AUTEC",
+    "AVUS Racing",
+    "AXXION",
+    "B52 Wheels",
+    "BALDR WHEELS",
+    "BARRACUDA",
+    "BBS",
+    "BERLIN WHEELS",
+    "BLACK RHINO",
+    "BORBET",
+    "BREYTON",
+    "BROCK / RC",
+    "CARMANI",
+    "CHEETAH WHEELS",
+    "CMS",
+    "COM 4 WHEELS",
+    "CORSPEED",
+    "CRAY WHEELS",
+    "DBV",
+    "DELTA 4x4",
+    "DEZENT",
+    "DIEWE WHEELS",
+    "DIRT A.T.",
+    "DOTZ",
+    "DREWSKE",
+    "Damina Performance",
+    "ELEGANCE WHEELS",
+    "EMOTION-WHEELS",
+    "ENKEI",
+    "ENZO",
+    "ETABETA",
+    "FF-WHEELS",
+    "FONDMETAL",
+    "GERMAN WHEELS",
+    "GMP ITALIA",
+    "GNB DESIGN",
+    "GTP WHEELS",
+    "IMPRESSIVE WHEELS",
+    "INFINY",
+    "JAPAN RACING WHEELS",
+    "KESKIN",
+    "KÖNIGSRÄDER",
+    "LA CHANTI PERFORMANCE",
+    "LENSO",
+    "LODER1899",
+    "LORINSER",
+    "LUETHEN MOTORSPORT",
+    "MAGMA",
+    "MAK",
+    "MAM",
+    "MB-DESIGN",
+    "MEISTERWERK WHEELS",
+    "MIM",
+    "MM-CONCEPTS",
+    "MOMO",
+    "MOTEC",
+    "MSW",
+    "MV7-Wheels",
+    "OXIGIN",
+    "OXXO",
+    "OZ",
+    "PLATIN",
+    "PROLINE WHEELS",
+    "ProLine Wheels",
+    "R STYLE WHEELS",
+    "RACER WHEELS",
+    "RAEDERWERK",
+    "REDS",
+    "RH ALURAD",
+    "RIAL",
+    "RID",
+    "RONAL",
+    "RONDELL",
+    "SAFAR",
+    "SECRET WHEELS",
+    "SPARCO",
+    "SPEEDLINE CORSE",
+    "STATUS ALLOY WHEELS",
+    "SX-WHEELS",
+    "Schmidt REVOLUTION",
+    "SuperMetal",
+    "TEAM DYNAMICS",
+    "TEC SPEEDWHEELS",
+    "TECNOMAGNESIO",
+    "TOMASON",
+    "TUFF A.T.",
+    "ULTRA WHEELS",
+    "V1 Wheels",
+    "W-TEC",
+    "WHEELWORLD",
+    "XTRA WHEELS",
+    "YIDO PERFORMANCE",
+    "YIDO WHEELS",
+    "Z Design Wheels",
+    "Z-Performance",
+    "artFORM",
+    "itWHEELS",
+]
+
 # Rate limiting configuration
 LAST_API_CALL_TIME = 0
 MIN_API_INTERVAL = 3  # Minimum seconds between API calls
@@ -524,6 +639,40 @@ def extract_model_from_text(pdf_text):
     if match:
         return match.group(1)
     return None
+
+
+def extract_reference_text_from_pdf(pdf_path: str, reference_number: str) -> str:
+
+    if not reference_number or not reference_number.strip():
+        return ""
+
+    reference_number = reference_number.strip().upper()
+    full_text = ""
+
+    try:
+        # 1. Extract text from all pages and concatenate
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text()
+                if text:
+                    full_text += "\n" + text
+
+    except Exception as e:
+        return f"Error reading PDF: {e}"
+
+    stop_markers = r'(?:\n\s*[A-Z][0-9]{2}\b|\n\s*(?:Lim|Car|Flh|Sth|BnK|M\+S|V\d{2})\b|\n\s*Seite|\Z)'
+
+    pattern = rf'(?:\n|^)\s*\b{re.escape(reference_number)}\b\s+(.*?)(?={stop_markers})'
+
+    # 3. Search using DotAll (s) so dot (.) matches newlines within the description
+    match = re.search(pattern, full_text, re.DOTALL)
+
+    if match:
+        extracted_text = match.group(1).strip()
+        cleaned_text = re.sub(r'\s+', ' ', extracted_text)
+        return cleaned_text
+
+    return ''
 
 
 def extract_wheel_size_from_text(pdf_text):
@@ -1196,7 +1345,7 @@ def split_long_title_task(task, max_length=80, min_models_to_split=3):
         return [task]
 
     # Parse the title to extract the prefix and models
-    # Expected format: "{size} Inch All-season Complete Wheels set for {Manufacturer} {Models}"
+    # Expected format: "{size} Inch All-season Complete Wheels set for "
     # or "{size} Inch All-season Complete Wheels set for {Models}"
 
     match = re.match(r'^(\d+\s+Inch\s+All-season\s+Complete\s+Wheels\s+set\s+for\s+)(.+)$', title)
@@ -1352,9 +1501,12 @@ def parse_data_from_pdf_local(pdf_path, use_cache=True, move_after_processing=Tr
     # Step 4: Extract wheel specifications from first table
     wheel_specs = extract_wheel_specs_from_first_table(first_table_data)
 
+    # Step 5: Extract rim manufacturer from text
+    rim_manufacturer = extract_rim_manufacturer_from_text(all_text)
+
     output_data = []
 
-    # Step 5: Process vehicle compatibility data if merged CSV exists
+    # Step 6: Process vehicle compatibility data if merged CSV exists
     if merged_csv_path and os.path.exists(merged_csv_path):
         try:
             # Get grouped data by manufacturer and tire size
@@ -1370,7 +1522,8 @@ def parse_data_from_pdf_local(pdf_path, use_cache=True, move_after_processing=Tr
                     'pcd': wheel_specs['pcd'],
                     'centre_bore': wheel_specs['centre_bore'],
                     'offset': wheel_specs['offset'],
-                    'tire_size': group['tire_size']
+                    'tire_size': group['tire_size'],
+                    'Rim_Manufacturer': rim_manufacturer
                 }
 
                 # Validate the extracted data
@@ -1401,7 +1554,8 @@ def parse_data_from_pdf_local(pdf_path, use_cache=True, move_after_processing=Tr
             'pcd': wheel_specs['pcd'],
             'centre_bore': wheel_specs['centre_bore'],
             'offset': wheel_specs['offset'],
-            'tire_size': None
+            'tire_size': None,
+            'Rim_Manufacturer': rim_manufacturer
         }
 
         # Validate and add if valid
@@ -1554,6 +1708,27 @@ def validate_task(task):
 
     return len(missing_fields) == 0, missing_fields
 
+def extract_rim_manufacturer_from_text(pdf_text):
+    """
+    Extract the rim manufacturer from PDF text using keyword matching.
+
+    Args:
+        pdf_text: Full text extracted from the PDF
+
+    Returns:
+        str: Rim manufacturer name or None if not found
+    """
+    # Normalize the text to improve matching chances
+    normalized_text = pdf_text.upper()
+
+    for manufacturer in RIM_MANUFACTURERS:
+        # Create a case-insensitive pattern for the manufacturer
+        pattern = re.escape(manufacturer.upper())
+        if re.search(pattern, normalized_text):
+            return manufacturer
+
+    return None
+
 if __name__ == "__main__":
     file_path = r"D:\fiverr\Automation\pdf_to_website\documents\1-HA-B32-9.5x19-5x112-ET48-D3-66.6.pdf"
 
@@ -1572,4 +1747,9 @@ if __name__ == "__main__":
     # output_data_ai = parse_data_from_pdf(file_path, use_cache=False, move_after_processing=False, use_ai=True)
     # for item in output_data_ai:
     #     print(json.dumps(item, indent=2, ensure_ascii=False))
+
+
+
+
+
 
