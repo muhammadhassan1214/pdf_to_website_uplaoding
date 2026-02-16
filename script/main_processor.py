@@ -20,13 +20,14 @@ from script.utils.automation import (
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
-def run_automation(pdf_path=None, reference_number=None, gui_callback=None, stop_checker=None, driver_setter=None):
+def run_automation(pdf_path=None, reference_number=None, brand_filter=None, gui_callback=None, stop_checker=None, driver_setter=None):
     """
     Main automation function that processes PDFs and automates website interactions.
 
     Args:
         pdf_path: Optional path to a specific PDF file. If None, processes all PDFs from documents folder.
         reference_number: Optional reference number (e.g., A12) to extract text for product descriptions.
+        brand_filter: Optional brand name to filter tasks (e.g., "Audi", "BMW"). "All Brands" means no filter.
         gui_callback: Optional callback function for logging to GUI.
         stop_checker: Optional function that returns True if stop was requested.
         driver_setter: Optional callback to set driver reference in GUI for cleanup.
@@ -41,6 +42,21 @@ def run_automation(pdf_path=None, reference_number=None, gui_callback=None, stop
     def should_stop():
         return stop_checker() if stop_checker else False
 
+    # Helper function to filter tasks by brand
+    def filter_tasks_by_brand(tasks, brand):
+        if not brand or brand == "All Brands":
+            return tasks
+
+        filtered = []
+        brand_lower = brand.lower()
+        for task in tasks:
+            # Check if brand name is in the Title (case insensitive)
+            # Title format is typically "19 Inch... for Audi..."
+            if brand_lower in str(task.get('Title', '')).lower():
+                filtered.append(task)
+
+        return filtered
+
     try:
         # Delete cache file for fresh run
         delete_cache_file()
@@ -54,7 +70,7 @@ def run_automation(pdf_path=None, reference_number=None, gui_callback=None, stop
 
                 # Extract reference text from the specific PDF if reference number is provided
                 if reference_number:
-                    reference_text = extract_reference_text_from_pdf(pdf_path, reference_number)
+                    reference_text = extract_reference_text_from_pdf(pdf_path, [i.strip() for i in reference_number.split(',')])
                     if reference_text:
                         log_message(f"Reference text found: {reference_text[:50]}...", gui_callback)
                     else:
@@ -94,6 +110,13 @@ def run_automation(pdf_path=None, reference_number=None, gui_callback=None, stop
                 log_message(f"No valid data found in: {pdf_filename}", gui_callback)
                 continue
 
+            # Apply Brand Filtering if selected
+            if brand_filter and brand_filter != "All Brands":
+                original_count = len(file_data_list)
+                file_data_list = filter_tasks_by_brand(file_data_list, brand_filter)
+                if len(file_data_list) < original_count:
+                    log_message(f"  → Filtered by brand '{brand_filter}': {len(file_data_list)} of {original_count} tasks kept", gui_callback)
+
             # Validate and filter tasks
             valid_tasks = []
             for task in file_data_list:
@@ -123,6 +146,13 @@ def run_automation(pdf_path=None, reference_number=None, gui_callback=None, stop
 
                     cached_data = process_tasks_with_title_splitting(cached_data, max_title_length=80)
 
+                    # Apply Brand Filtering to cached data if selected
+                    if brand_filter and brand_filter != "All Brands":
+                        original_count = len(cached_data)
+                        cached_data = filter_tasks_by_brand(cached_data, brand_filter)
+                        if len(cached_data) < original_count:
+                            log_message(f"  → Filtered by brand '{brand_filter}': {len(cached_data)} of {original_count} tasks kept", gui_callback)
+
                     valid_tasks = []
                     for task in cached_data:
                         is_valid, missing = validate_task(task)
@@ -141,7 +171,7 @@ def run_automation(pdf_path=None, reference_number=None, gui_callback=None, stop
         log_message(f"Total tasks: {len(task_list)}", gui_callback)
 
         if not task_list:
-            log_message("No valid tasks found. Exiting.", gui_callback)
+            log_message("No valid tasks found (check PDF content or Brand Filter). Exiting.", gui_callback)
             return False
 
         # Remove duplicate tasks from cache before processing
@@ -241,4 +271,3 @@ def run_automation(pdf_path=None, reference_number=None, gui_callback=None, stop
             except:
                 pass
         return False
-

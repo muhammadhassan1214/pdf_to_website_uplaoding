@@ -3,6 +3,8 @@ import re
 import json
 import time
 import shutil
+import PyPDF2
+import difflib
 import pdfplumber
 import pandas as pd
 from collections import defaultdict
@@ -145,15 +147,6 @@ PROCESSED_DOCS_FOLDER = os.path.join(os.path.dirname(os.path.dirname(os.path.dir
 # ============================================
 
 def format_tyre_width(value):
-    """
-    Format tyre width to be an int if it's a whole number, otherwise keep as float.
-
-    Args:
-        value: The tyre width value (int, float, or None)
-
-    Returns:
-        int if value is a whole number (e.g., 8.0 -> 8), float otherwise (e.g., 8.5 -> 8.5), or None
-    """
     if value is None:
         return None
     if isinstance(value, (int, float)):
@@ -190,24 +183,7 @@ def update_last_api_call_time():
     LAST_API_CALL_TIME = time.time()
 
 
-# ============================================
-# Cache Management Functions
-# ============================================
-
 def load_cache():
-    """
-    Load the cache from the JSON file.
-
-    Returns:
-        dict: Cache data with structure:
-            {
-                "pdf_filename": {
-                    "data": [...extracted data...],
-                    "processed_at": "ISO timestamp",
-                    "source_path": "original path"
-                }
-            }
-    """
     if os.path.exists(CACHE_FILE_PATH):
         try:
             with open(CACHE_FILE_PATH, 'r', encoding='utf-8') as f:
@@ -219,12 +195,6 @@ def load_cache():
 
 
 def save_cache(cache_data):
-    """
-    Save the cache to the JSON file.
-
-    Args:
-        cache_data: Dictionary containing cached extraction results
-    """
     try:
         with open(CACHE_FILE_PATH, 'w', encoding='utf-8') as f:
             json.dump(cache_data, f, indent=2, ensure_ascii=False)
@@ -233,15 +203,6 @@ def save_cache(cache_data):
 
 
 def get_cached_result(pdf_filename):
-    """
-    Get cached extraction result for a PDF file.
-
-    Args:
-        pdf_filename: Name of the PDF file (not full path)
-
-    Returns:
-        list or None: Cached data if exists, None otherwise
-    """
     cache = load_cache()
     if pdf_filename in cache:
         print(f"Cache hit: Using cached data for '{pdf_filename}'")
@@ -250,14 +211,6 @@ def get_cached_result(pdf_filename):
 
 
 def cache_result(pdf_filename, data, source_path):
-    """
-    Cache the extraction result for a PDF file.
-
-    Args:
-        pdf_filename: Name of the PDF file
-        data: Extracted data to cache
-        source_path: Original path of the PDF file
-    """
     # Format Tyre_Width for each data item before caching
     if isinstance(data, list):
         for item in data:
@@ -274,41 +227,7 @@ def cache_result(pdf_filename, data, source_path):
     print(f"Cached extraction results for '{pdf_filename}'")
 
 
-def delete_from_cache(pdf_filename):
-    """
-    Delete a specific entry from the cache.
-
-    Args:
-        pdf_filename: Name of the PDF file to remove from cache
-
-    Returns:
-        bool: True if entry was deleted, False if not found
-    """
-    cache = load_cache()
-    if pdf_filename in cache:
-        del cache[pdf_filename]
-        save_cache(cache)
-        print(f"Deleted '{pdf_filename}' from cache")
-        return True
-    return False
-
-
-def clear_cache():
-    """
-    Clear all entries from the cache.
-    """
-    save_cache({})
-    print("Cache cleared")
-
-
 def delete_cache_file():
-    """
-    Delete the cache JSON file completely.
-    Called at the start of each run to ensure fresh processing.
-
-    Returns:
-        bool: True if file was deleted, False if it didn't exist
-    """
     if os.path.exists(CACHE_FILE_PATH):
         try:
             os.remove(CACHE_FILE_PATH)
@@ -321,17 +240,6 @@ def delete_cache_file():
 
 
 def remove_duplicate_tasks_from_cache():
-    """
-    Verify and remove duplicate tasks from the cache file.
-    A task is considered duplicate if it has the same Title, Model, Tyre_Width,
-    Tyre_dia, holes, pcd, centre_bore, offset, and tire_size.
-
-    This function should be called before running web automation to ensure
-    no duplicate tasks are processed.
-
-    Returns:
-        tuple: (total_removed, details) where details is a dict with removal info per PDF
-    """
     cache = load_cache()
     if not cache:
         print("Cache is empty, no duplicates to remove.")
@@ -411,35 +319,7 @@ def create_task_key(task):
     return tuple(key_values)
 
 
-def get_all_cached_files():
-    """
-    Get a list of all cached PDF filenames.
-
-    Returns:
-        list: List of cached PDF filenames
-    """
-    cache = load_cache()
-    return list(cache.keys())
-
-
-# ============================================
-# Processed Tasks Management Functions
-# ============================================
-
 def load_processed_tasks():
-    """
-    Load the processed tasks from the JSON file.
-
-    Returns:
-        dict: Processed tasks data with structure:
-            {
-                "pdf_filename": {
-                    "tasks": [...processed task data...],
-                    "processed_at": "ISO timestamp",
-                    "source_path": "original path"
-                }
-            }
-    """
     if os.path.exists(PROCESSED_TASKS_FILE_PATH):
         try:
             with open(PROCESSED_TASKS_FILE_PATH, 'r', encoding='utf-8') as f:
@@ -451,12 +331,6 @@ def load_processed_tasks():
 
 
 def save_processed_tasks(processed_data):
-    """
-    Save the processed tasks to the JSON file.
-
-    Args:
-        processed_data: Dictionary containing processed task results
-    """
     try:
         with open(PROCESSED_TASKS_FILE_PATH, 'w', encoding='utf-8') as f:
             json.dump(processed_data, f, indent=2, ensure_ascii=False)
@@ -465,18 +339,6 @@ def save_processed_tasks(processed_data):
 
 
 def move_task_to_processed(pdf_filename, task_data, processing_result=None):
-    """
-    Move a specific task entry from ai_extraction_cache.json to processed_tasks.json.
-    This removes the task from the cache and adds it to processed tasks.
-
-    Args:
-        pdf_filename: Name of the PDF file
-        task_data: The task dictionary that was processed
-        processing_result: Optional dict with processing outcome (e.g., {'premium_created': True, 'cheap_created': False})
-
-    Returns:
-        bool: True if successfully moved, False otherwise
-    """
     # Load both files
     cache = load_cache()
     processed = load_processed_tasks()
@@ -518,26 +380,6 @@ def move_task_to_processed(pdf_filename, task_data, processing_result=None):
     return True
 
 
-def get_processed_tasks_count(pdf_filename):
-    """
-    Get the count of processed tasks for a specific PDF.
-
-    Args:
-        pdf_filename: Name of the PDF file
-
-    Returns:
-        int: Number of processed tasks
-    """
-    processed = load_processed_tasks()
-    if pdf_filename in processed:
-        return len(processed[pdf_filename].get('tasks', []))
-    return 0
-
-
-# ============================================
-# File Management Functions
-# ============================================
-
 def ensure_processed_folder_exists():
     """
     Ensure the processed documents folder exists.
@@ -548,15 +390,6 @@ def ensure_processed_folder_exists():
 
 
 def move_to_processed(pdf_path):
-    """
-    Move a processed PDF file to the processed documents folder.
-
-    Args:
-        pdf_path: Full path to the PDF file
-
-    Returns:
-        str or None: New path of the moved file, or None if failed
-    """
     ensure_processed_folder_exists()
 
     try:
@@ -579,60 +412,7 @@ def move_to_processed(pdf_path):
         return None
 
 
-def cleanup_after_use(pdf_filename):
-    """
-    Clean up cached data after it has been used by the web automation script.
-    This maintains storage efficiency and data hygiene.
-
-    Args:
-        pdf_filename: Name of the PDF file whose cache should be cleaned
-
-    Returns:
-        bool: True if cleanup was successful
-    """
-    return delete_from_cache(pdf_filename)
-
-
-def get_unprocessed_pdfs(directory):
-    """
-    Get list of PDFs that haven't been processed yet (not in cache).
-
-    Args:
-        directory: Directory to scan for PDF files
-
-    Returns:
-        list: List of paths to unprocessed PDF files
-    """
-    all_pdfs = get_pdf_paths(directory)
-    cache = load_cache()
-
-    unprocessed = []
-    for pdf_path in all_pdfs:
-        filename = os.path.basename(pdf_path)
-        if filename not in cache:
-            unprocessed.append(pdf_path)
-
-    return unprocessed
-
-
-def get_pdf_paths(directory):
-    pdf_paths = []
-    for root, dirs, files in os.walk(directory):
-        for file in files:
-            if file.lower().endswith('.pdf'):
-                pdf_paths.append(os.path.join(root, file))
-    return pdf_paths
-
 def extract_model_from_text(pdf_text):
-    """
-    Extract the model identifier from PDF text (e.g., "Modell B44" -> "B44").
-
-    Args:
-        pdf_text: Full text extracted from the PDF
-
-    Returns:
-        str: Model identifier or None if not found
-    """
     # Pattern to match "Modell" followed by the model name (e.g., "Modell B44")
     pattern = r'Modell\s+([A-Za-z0-9]+)'
     match = re.search(pattern, pdf_text)
@@ -641,12 +421,12 @@ def extract_model_from_text(pdf_text):
     return None
 
 
-def extract_reference_text_from_pdf(pdf_path: str, reference_number: str) -> str:
+def extract_reference_text_from_pdf(pdf_path: str, reference_numbers: list) -> str:
 
-    if not reference_number or not reference_number.strip():
+    if not reference_numbers:
         return ""
 
-    reference_number = reference_number.strip().upper()
+    extracted_numbers = ""
     full_text = ""
 
     try:
@@ -661,33 +441,22 @@ def extract_reference_text_from_pdf(pdf_path: str, reference_number: str) -> str
         return f"Error reading PDF: {e}"
 
     stop_markers = r'(?:\n\s*[A-Z][0-9]{2}\b|\n\s*(?:Lim|Car|Flh|Sth|BnK|M\+S|V\d{2})\b|\n\s*Seite|\Z)'
+    for ref_numb in reference_numbers:
+        ref_numb = ref_numb.strip().upper()
+        pattern = rf'(?:\n|^)\s*\b{re.escape(ref_numb)}\b\s+(.*?)(?={stop_markers})'
 
-    pattern = rf'(?:\n|^)\s*\b{re.escape(reference_number)}\b\s+(.*?)(?={stop_markers})'
+        # 3. Search using DotAll (s) so dot (.) matches newlines within the description
+        match = re.search(pattern, full_text, re.DOTALL)
 
-    # 3. Search using DotAll (s) so dot (.) matches newlines within the description
-    match = re.search(pattern, full_text, re.DOTALL)
+        if match:
+            extracted_text = match.group(1).strip()
+            cleaned_text = re.sub(r'\s+', ' ', extracted_text)
+            extracted_numbers += f"{cleaned_text}\n"
 
-    if match:
-        extracted_text = match.group(1).strip()
-        cleaned_text = re.sub(r'\s+', ' ', extracted_text)
-        return cleaned_text
-
-    return ''
+    return extracted_numbers
 
 
 def extract_wheel_size_from_text(pdf_text):
-    """
-    Extract the wheel size and tyre width from PDF text (e.g., "Radgröße 8,5Jx19H2" or "Radgre 8,5Jx19H2").
-
-    Args:
-        pdf_text: Full text extracted from the PDF
-
-    Returns:
-        tuple: (wheel_size_formatted, tyre_width, tyre_size) or (None, None, None) if not found
-            - wheel_size_formatted: Full wheel size string with inch designation (e.g., "8,5Jx19H2 (19)")
-            - tyre_width: Width as float (e.g., 8.5)
-            - tyre_size: Inch size as int (e.g., 19)
-    """
     # Pattern to match "Radgröße" or "Radgre" (German umlaut variations) followed by wheel size
     # Wheel size format: e.g., "8,5Jx19H2" - number, optional comma, decimal, J, x, inch size, H, number
     pattern = r'Radgr[öo]?[ße]?e?\s+(\d+[,.]?\d*Jx\d+H?\d*)'
@@ -715,40 +484,19 @@ def extract_wheel_size_from_text(pdf_text):
 
 
 def process_pdf(pdf_path):
-    """
-    Process a PDF file and extract text and tables.
-
-    Returns:
-        tuple: (all_text, first_table_data, merged_csv_path)
-            - all_text: Full text of the PDF
-            - first_table_data: List of dictionaries containing first table data (without header)
-            - merged_csv_path: File path to the CSV containing merged tables (3rd onwards)
-    """
     all_text = ""
     all_tables = []
 
     with pdfplumber.open(pdf_path) as pdf:
         for page_num, page in enumerate(pdf.pages, start=1):
-    
-            # -------------------------------
-            # 1. Extract full text from page
-            # -------------------------------
             text = page.extract_text()
             if text:
                 all_text += f"\n\n--- Page {page_num} ---\n"
                 all_text += text
-    
-            # -------------------------------
-            # 2. Extract tables from page
-            # -------------------------------
             page_tables = page.extract_tables()
-    
+
             for t_index, table in enumerate(page_tables, start=1):
                 all_tables.append(table)
-
-    # -------------------------------
-    # 3. Process tables according to requirements
-    # -------------------------------
 
     first_table_data = []
     merged_csv_path = None
@@ -793,15 +541,6 @@ def process_pdf(pdf_path):
 
 
 def extract_manufacturer(vehicle_info):
-    """
-    Extract the manufacturer name from the vehicle info string.
-
-    Args:
-        vehicle_info: String containing vehicle details
-
-    Returns:
-        str: Manufacturer name (e.g., 'Audi', 'Seat', 'Skoda', 'Mercedes', etc.)
-    """
     if not vehicle_info or not isinstance(vehicle_info, str):
         return None
 
@@ -818,9 +557,10 @@ def extract_manufacturer(vehicle_info):
         'BMW': r'^BMW\b',
         'Porsche': r'^Porsche\b',
         'Infiniti': r'^Infiniti\b',
+        'Tesla': r'^Tesla\b',
+        'BYD': r'^BYD\b',
+        'Ford': r'^Ford\b',
         'Ssangyong': r'^(Ssangyong|KG\s*Mobility)\b',
-        # Mercedes patterns - must match various model naming conventions
-        # Including patterns like "C 63 AMG", "E 500", "EQA-Klasse", "EQB-Klasse"
         'Mercedes': r'^(Mercedes|A-Klasse|B-Klasse|C-Klasse|E-Klasse|S-Klasse|G-Klasse|R-Klasse|V-Klasse|GLA|GLB|GLC|GLE|GLK|GLS|CLA|CLE|CLS|SL\b|SLC|SLK|AMG|EQ[ABCES]?-?Klasse|Vito|Viano|Citan|Sprinter|[ABCEGSRV]\s+\d|EQ[ABCES]\b)',
     }
 
@@ -849,15 +589,6 @@ def extract_manufacturer(vehicle_info):
 
 
 def extract_model_name(vehicle_info):
-    """
-    Extract the model name from the vehicle info string.
-
-    Args:
-        vehicle_info: String containing vehicle details
-
-    Returns:
-        str: Model name (e.g., 'A4', 'Ibiza', 'Fabia', etc.)
-    """
     if not vehicle_info or not isinstance(vehicle_info, str):
         return None
 
@@ -867,31 +598,6 @@ def extract_model_name(vehicle_info):
 
 
 def filter_and_group_by_manufacturer_and_tire_size(csv_path):
-    """
-    Filter and group vehicle data by manufacturer and tire size.
-
-    Important principles:
-    - Each vehicle model has its own approved tyre sizes.
-    - Tyre sizes are manufacturer-specific and model-specific.
-    - NEVER mix different manufacturers in one group.
-    - A group must contain only ONE manufacturer and its models only.
-    - Each model appears ONLY ONCE with its most frequent tire size (mode).
-    - Models are grouped only if they share the exact same selected tire size.
-
-    Args:
-        csv_path: Path to the CSV file containing vehicle data
-
-    Returns:
-        dict: Dictionary with structure:
-            {
-                (manufacturer, tire_size): {
-                    'manufacturer': str,
-                    'tire_size': str,
-                    'models': [list of model names],
-                    'title': str (formatted title for the group)
-                }
-            }
-    """
     from collections import Counter
 
     # Read the CSV file
@@ -993,24 +699,6 @@ def filter_and_group_by_manufacturer_and_tire_size(csv_path):
 
 
 def get_valid_tire_groups(csv_path):
-    """
-    Get valid tire groups where models share the exact same tire size within a manufacturer.
-
-    Each model appears ONLY ONCE with its most frequent (mode) tire size.
-    Models are then grouped by manufacturer + selected tire size.
-
-    Args:
-        csv_path: Path to the CSV file containing vehicle data
-
-    Returns:
-        list: List of valid groups, each containing:
-            {
-                'manufacturer': str,
-                'tire_size': str,
-                'models': [list of model names],
-                'title': str (formatted title for the group)
-            }
-    """
     grouped_data = filter_and_group_by_manufacturer_and_tire_size(csv_path)
 
     # Convert to list and sort by manufacturer, then by tire size
@@ -1025,15 +713,6 @@ def get_valid_tire_groups(csv_path):
 
 
 def extract_raw_text_from_pdf(pdf_path):
-    """
-    Extract raw text from all pages of a PDF file.
-
-    Args:
-        pdf_path: Path to the PDF file
-
-    Returns:
-        str: Concatenated text from all pages
-    """
     all_text = ""
 
     with pdfplumber.open(pdf_path) as pdf:
@@ -1055,15 +734,6 @@ def extract_raw_text_from_pdf(pdf_path):
 
 
 def extract_data_with_ai(pdf_text):
-    """
-    Use OpenAI API to extract and structure data from PDF text.
-
-    Args:
-        pdf_text: Raw text extracted from the PDF
-
-    Returns:
-        list: List of dictionaries containing structured output data
-    """
     # Define the JSON schema for the expected output
     system_prompt = """You are an expert at extracting and structuring data from German vehicle certification documents (ABE - Allgemeine Betriebserlaubnis).
 
@@ -1214,23 +884,6 @@ Return ONLY a valid JSON array with the extracted data. No additional text or ex
 
 
 def extract_wheel_specs_from_first_table(first_table_data):
-    """
-    Extract wheel specifications (holes, pcd, centre_bore, offset) from the first table.
-
-    The first table typically contains wheel specs in formats like:
-    - Lochzahl (holes): "5"
-    - Lochkreis (pcd): "112"
-    - Mittenbohrung (centre_bore): "66,6" or "66.6"
-    - Einpreßtiefe/Einpresstiefe/ET (offset): "48"
-
-    Or combined format like "5/112/66,6" with offset separately.
-
-    Args:
-        first_table_data: List of dictionaries from first table
-
-    Returns:
-        dict: Dictionary with holes, pcd, centre_bore, offset (or None for missing values)
-    """
     specs = {
         'holes': None,
         'pcd': None,
@@ -1281,19 +934,6 @@ def extract_wheel_specs_from_first_table(first_table_data):
 
 
 def validate_extracted_data(data_item):
-    """
-    Validate extracted data to ensure it meets quality requirements.
-
-    Validation rules:
-    - Title should start with a number (e.g., "19 Inch...")
-    - Required fields should not be None or empty
-
-    Args:
-        data_item: Dictionary containing extracted data
-
-    Returns:
-        tuple: (is_valid, error_messages)
-    """
     errors = []
 
     # Check if title starts with a number
@@ -1322,23 +962,6 @@ def validate_extracted_data(data_item):
 
 
 def split_long_title_task(task, max_length=80, min_models_to_split=3):
-    """
-    Split a task with a long title into multiple tasks with shorter titles.
-
-    The title format is typically:
-    "{size} Inch All-season Complete Wheels set for {Manufacturer} {Model1}, {Model2}, ..."
-
-    This function splits the models into groups that fit within the max_length limit.
-    Only splits if there are at least min_models_to_split models in the title.
-
-    Args:
-        task: Dictionary containing task data with a 'Title' key
-        max_length: Maximum allowed title length (default: 80)
-        min_models_to_split: Minimum number of models required to split (default: 3)
-
-    Returns:
-        list: List of tasks (original if title <= max_length or less than min_models_to_split models, or split tasks)
-    """
     title = task.get('Title')
 
     if not title or len(title) <= max_length:
@@ -1373,6 +996,8 @@ def split_long_title_task(task, max_length=80, min_models_to_split=3):
         (r'^(Infiniti)\s+', 'Infiniti'),
         (r'^(Mazda)\s+', 'Mazda'),
         (r'^(Ssangyong)\s+', 'Ssangyong'),
+        (r'^(Tesla)\s+', 'Tesla'),
+        (r'^(BYD)\s+', 'BYD')
     ]
 
     for pattern, mfr in manufacturer_patterns:
@@ -1437,17 +1062,6 @@ def split_long_title_task(task, max_length=80, min_models_to_split=3):
 
 
 def process_tasks_with_title_splitting(tasks, max_title_length=80, min_models_to_split=3):
-    """
-    Process a list of tasks and split any tasks with titles exceeding max_title_length.
-
-    Args:
-        tasks: List of task dictionaries
-        max_title_length: Maximum allowed title length (default: 80)
-        min_models_to_split: Minimum number of models required to split (default: 3)
-
-    Returns:
-        list: List of tasks with long titles split into multiple tasks
-    """
     processed_tasks = []
 
     for task in tasks:
@@ -1458,29 +1072,6 @@ def process_tasks_with_title_splitting(tasks, max_title_length=80, min_models_to
 
 
 def parse_data_from_pdf_local(pdf_path, use_cache=True, move_after_processing=True):
-    """
-    Process a PDF using LOCAL parsing functions to extract and structure data.
-
-    This function uses pdfplumber to extract text and tables, then processes
-    them locally without relying on external AI APIs.
-
-    Args:
-        pdf_path: Path to the PDF file
-        use_cache: Whether to check/use cached results (default: True)
-        move_after_processing: Whether to move PDF to processed folder after extraction (default: True)
-
-    Returns:
-        list: List of dictionaries containing output data with keys:
-            - Title: Generated title for the tire group
-            - Model: Extracted model from PDF
-            - Tyre_Width: Extracted tire width
-            - Tyre_dia: Extracted tire diameter
-            - holes: Number of holes from first table
-            - pcd: PCD value from first table
-            - centre_bore: Centre bore value from first table
-            - offset: Offset value from first table
-            - tire_size: Formatted tire size string
-    """
     pdf_filename = os.path.basename(pdf_path)
 
     # Check cache first if enabled
@@ -1583,30 +1174,6 @@ def parse_data_from_pdf_local(pdf_path, use_cache=True, move_after_processing=Tr
 
 
 def parse_data_from_pdf(pdf_path, use_cache=True, move_after_processing=True, use_ai=False):
-    """
-    Process a PDF to extract and structure data.
-
-    This function can use either local parsing or AI-powered extraction.
-    By default, it uses local parsing for faster and more reliable results.
-
-    Args:
-        pdf_path: Path to the PDF file
-        use_cache: Whether to check/use cached results (default: True)
-        move_after_processing: Whether to move PDF to processed folder after extraction (default: True)
-        use_ai: Whether to use AI extraction instead of local parsing (default: False)
-
-    Returns:
-        list: List of dictionaries containing output data with keys:
-            - Title: Generated title for the tire group
-            - Model: Extracted model from PDF
-            - Tyre_Width: Extracted tire width
-            - Tyre_dia: Extracted tire diameter
-            - holes: Number of holes from first table
-            - pcd: PCD value from first table
-            - centre_bore: Centre bore value from first table
-            - offset: Offset value from first table
-            - tire_size: Formatted tire size string
-    """
     if use_ai:
         # Use AI-powered extraction
         return parse_data_from_pdf_ai(pdf_path, use_cache, move_after_processing)
@@ -1616,30 +1183,6 @@ def parse_data_from_pdf(pdf_path, use_cache=True, move_after_processing=True, us
 
 
 def parse_data_from_pdf_ai(pdf_path, use_cache=True, move_after_processing=True):
-    """
-    Process a PDF using AI to extract and structure data.
-
-    This function extracts raw text from the PDF and sends it to OpenAI API
-    for intelligent parsing and structuring. It includes caching to avoid
-    reprocessing the same document.
-
-    Args:
-        pdf_path: Path to the PDF file
-        use_cache: Whether to check/use cached results (default: True)
-        move_after_processing: Whether to move PDF to processed folder after extraction (default: True)
-
-    Returns:
-        list: List of dictionaries containing output data with keys:
-            - Title: Generated title for the tire group
-            - Model: Extracted model from PDF
-            - Tyre_Width: Extracted tire width
-            - Tyre_dia: Extracted tire diameter
-            - holes: Number of holes from first table
-            - pcd: PCD value from first table
-            - centre_bore: Centre bore value from first table
-            - offset: Offset value from first table
-            - tire_size: Formatted tire size string
-    """
     pdf_filename = os.path.basename(pdf_path)
 
     # Check cache first if enabled
@@ -1708,48 +1251,21 @@ def validate_task(task):
 
     return len(missing_fields) == 0, missing_fields
 
-def extract_rim_manufacturer_from_text(pdf_text):
-    """
-    Extract the rim manufacturer from PDF text using keyword matching.
-
-    Args:
-        pdf_text: Full text extracted from the PDF
-
-    Returns:
-        str: Rim manufacturer name or None if not found
-    """
-    # Normalize the text to improve matching chances
-    normalized_text = pdf_text.upper()
-
+def extract_rim_manufacturer_from_text(all_text):
+    match = re.search(r'Auftraggeber[\s:]+([A-Za-z0-9\-]+)', all_text, re.IGNORECASE)
+    if not match:
+        return "Keyword 'Auftraggeber' or the subsequent word was not found in the PDF."
+    extracted_first_word = match.group(1).strip()
     for manufacturer in RIM_MANUFACTURERS:
-        # Create a case-insensitive pattern for the manufacturer
-        pattern = re.escape(manufacturer.upper())
-        if re.search(pattern, normalized_text):
+        list_first_word = re.split(r'[\s/]+', manufacturer)[0]
+        if extracted_first_word.lower() == list_first_word.lower():
             return manufacturer
+    return f"No match found. The word extracted after 'Auftraggeber' was: '{extracted_first_word}'"
 
-    return None
-
-if __name__ == "__main__":
-    file_path = r"D:\fiverr\Automation\pdf_to_website\documents\1-HA-B32-9.5x19-5x112-ET48-D3-66.6.pdf"
-
-    # Test local parsing (default, no AI)
-    print("=" * 50)
-    print("Testing LOCAL parsing (no AI):")
-    print("=" * 50)
-    output_data = parse_data_from_pdf(file_path, use_cache=False, move_after_processing=False, use_ai=False)
-    for item in output_data:
-        print(json.dumps(item, indent=2, ensure_ascii=False))
-
-    # Uncomment below to test AI parsing
-    # print("\n" + "=" * 50)
-    # print("Testing AI parsing:")
-    # print("=" * 50)
-    # output_data_ai = parse_data_from_pdf(file_path, use_cache=False, move_after_processing=False, use_ai=True)
-    # for item in output_data_ai:
-    #     print(json.dumps(item, indent=2, ensure_ascii=False))
-
-
-
-
-
-
+def get_pdf_paths(pdf_directory):
+    pdf_paths = []
+    for root, dirs, files in os.walk(pdf_directory):
+        for file in files:
+            if file.lower().endswith('.pdf'):
+                pdf_paths.append(os.path.join(root, file))
+    return pdf_paths
