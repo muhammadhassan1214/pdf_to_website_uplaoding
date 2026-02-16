@@ -3,8 +3,6 @@ import re
 import json
 import time
 import shutil
-import PyPDF2
-import difflib
 import pdfplumber
 import pandas as pd
 from collections import defaultdict

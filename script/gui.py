@@ -380,7 +380,7 @@ class PDFProcessorApp:
             else:
                 self.root.after(0, lambda: self._log_message("Processing finished with warnings.", 'WARNING'))
 
-        except Exception as e:
+        except:
             self.root.after(0, lambda: self._log_message(f"Error during processing: {e}", 'ERROR'))
         finally:
             self.root.after(0, self._processing_complete)
