@@ -455,29 +455,39 @@ def extract_reference_text_from_pdf(pdf_path: str, reference_numbers: list) -> s
 
 
 def extract_wheel_size_from_text(pdf_text):
-    # Pattern to match "Radgröße" or "Radgre" (German umlaut variations) followed by wheel size
-    # Wheel size format: e.g., "8,5Jx19H2" - number, optional comma, decimal, J, x, inch size, H, number
-    pattern = r'Radgr[öo]?[ße]?e?\s+(\d+[,.]?\d*Jx\d+H?\d*)'
-    match = re.search(pattern, pdf_text, re.IGNORECASE)
-    if match:
-        wheel_size = match.group(1)
+    # Updated pattern: allows optional spaces (\s*) between the numbers, J, x, and H
+    # Also added [\s:]+ to handle cases where it might say "Radgröße: 8,5..."
+    pattern = r'Radgr[öo]?[ße]?e?[\s:]+(\d+[,.]?\d*\s*[Jj]\s*[Xx]\s*\d+\s*[Hh]?\d*)'
 
-        # Extract tyre width (e.g., "8,5Jx19H2" -> 8.5)
+    match = re.search(pattern, pdf_text, re.IGNORECASE)
+
+    if match:
+        raw_wheel_size = match.group(1)
+
+        # Normalize the string by removing all spaces and making it uppercase
+        # "8,5 J X 19 H2" -> "8,5JX19H2"
+        wheel_size = re.sub(r'\s+', '', raw_wheel_size).upper()
+
+        # Extract tyre width (e.g., "8,5JX19H2" -> 8.5)
         width_match = re.search(r'^(\d+[,.]?\d*)', wheel_size)
         tyre_width = None
         if width_match:
             width_str = width_match.group(1).replace(',', '.')
+            # Assuming format_tyre_width is defined elsewhere in your code
             tyre_width = format_tyre_width(float(width_str))
 
-        # Extract inch size from wheel size (e.g., "8,5Jx19H2" -> 19)
-        inch_match = re.search(r'Jx(\d+)', wheel_size)
+        # Extract inch size from the normalized wheel size (e.g., "8,5JX19H2" -> 19)
+        inch_match = re.search(r'JX(\d+)', wheel_size)
         tyre_size = None
         if inch_match:
             tyre_size = int(inch_match.group(1))
+
+            # Using the cleaned string for the formatted output
             wheel_size_formatted = f"{wheel_size} ({tyre_size})"
             return wheel_size_formatted, tyre_width, tyre_size
 
         return wheel_size, tyre_width, tyre_size
+
     return None, None, None
 
 
