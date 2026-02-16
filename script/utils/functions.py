@@ -1260,15 +1260,15 @@ def validate_task(task):
     return len(missing_fields) == 0, missing_fields
 
 def extract_rim_manufacturer_from_text(all_text):
-    match = re.search(r'Auftraggeber[\s:]+([A-Za-z0-9\-]+)', all_text, re.IGNORECASE)
+    match = re.search(r'Herstellerzeichen[\s:]+([A-Za-z0-9\-]+)', all_text, re.IGNORECASE)
     if not match:
-        return "Keyword 'Auftraggeber' or the subsequent word was not found in the PDF."
+        return "Keyword 'Herstellerzeichen' or the subsequent word was not found in the PDF."
     extracted_first_word = match.group(1).strip()
     for manufacturer in RIM_MANUFACTURERS:
         list_first_word = re.split(r'[\s/]+', manufacturer)[0]
         if extracted_first_word.lower() == list_first_word.lower():
             return manufacturer
-    return f"No match found. The word extracted after 'Auftraggeber' was: '{extracted_first_word}'"
+    return f"No match found. The word extracted after 'Herstellerzeichen' was: '{extracted_first_word}'"
 
 def get_pdf_paths(pdf_directory):
     pdf_paths = []
