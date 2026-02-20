@@ -1259,16 +1259,28 @@ def validate_task(task):
 
     return len(missing_fields) == 0, missing_fields
 
+
 def extract_rim_manufacturer_from_text(all_text):
-    match = re.search(r'Herstellerzeichen[\s:]+([A-Za-z0-9\-]+)', all_text, re.IGNORECASE)
-    if not match:
-        return "Keyword 'Herstellerzeichen' or the subsequent word was not found in the PDF."
-    extracted_first_word = match.group(1).strip()
-    for manufacturer in RIM_MANUFACTURERS:
-        list_first_word = re.split(r'[\s/]+', manufacturer)[0]
-        if extracted_first_word.lower() == list_first_word.lower():
-            return manufacturer
-    return f"No match found. The word extracted after 'Herstellerzeichen' was: '{extracted_first_word}'"
+    # Use re.finditer to get all matches in the text instead of just the first one
+    matches = list(re.finditer(r'Herstellerzeichen[\s:]+([A-Za-z0-9\-]+)', all_text, re.IGNORECASE))
+
+    if not matches:
+        return "Keyword 'Herstellerzeichen' was not found in the PDF."
+
+    tried_words = []
+
+    # Iterate through every instance found in the text
+    for match in matches:
+        extracted_first_word = match.group(1).strip()
+        tried_words.append(extracted_first_word)
+
+        # Check this specific extracted word against the manufacturer list
+        for manufacturer in RIM_MANUFACTURERS:
+            list_first_word = re.split(r'[\s/]+', manufacturer)[0]
+            if extracted_first_word.lower() == list_first_word.lower():
+                return manufacturer
+
+    return f"No match found. The words extracted after 'Herstellerzeichen' were: {', '.join(tried_words)}"
 
 def get_pdf_paths(pdf_directory):
     pdf_paths = []

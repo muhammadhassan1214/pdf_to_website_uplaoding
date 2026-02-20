@@ -170,9 +170,14 @@ def navigate_to_rims_page(driver, gui_callback=None):
     time.sleep(2)
 
 
+import time
+from selenium.webdriver.common.by import By
+
+
 def search_rim(driver, model, tyre_dia, rim_manufacturer=None, gui_callback=None):
     """
     Search for a rim with specified parameters.
+    Includes a fallback retry for 'WHEELWORLD' to '2DRV by WHEELWORLD'.
 
     Args:
         driver: Selenium WebDriver instance
@@ -186,18 +191,43 @@ def search_rim(driver, model, tyre_dia, rim_manufacturer=None, gui_callback=None
         bool: True if rims were found, False otherwise
     """
     # Use provided manufacturer or default to 'BROCK / RC'
-    manufacturer = rim_manufacturer if rim_manufacturer else 'BROCK / RC'
+    initial_manufacturer = rim_manufacturer if rim_manufacturer else 'BROCK / RC'
 
-    select_dropdown_by_text(driver, (By.XPATH, create_xpath('Select Manufacturer')), manufacturer)
-    time.sleep(2)
-    select_dropdown_by_text(driver, (By.XPATH, create_xpath('Select Size')),
-                            str(tyre_dia) if tyre_dia else '')
-    input_element(driver, (By.CSS_SELECTOR, "input[placeholder= 'Min Availability']"), '75')
-    input_element(driver, (By.CSS_SELECTOR, "input[placeholder= 'Rim type']"), model if model else '')
-    click_element(driver, (By.XPATH, "(//button[text()= 'Search'])[1]"))
+    # Set up our retry queue
+    manufacturers_to_try = [initial_manufacturer]
+    if initial_manufacturer == "WHEELWORLD":
+        manufacturers_to_try.append("2DRV by WHEELWORLD")
 
-    no_rims_found = check_element_exists(driver, (By.XPATH, "//div[text()= 'No rims found']"))
-    return not no_rims_found
+    for current_manufacturer in manufacturers_to_try:
+        if gui_callback:
+            gui_callback(f"Searching with manufacturer: {current_manufacturer}")
+
+        # Execute the search actions
+        select_dropdown_by_text(driver, (By.XPATH, create_xpath('Select Manufacturer')), current_manufacturer)
+        time.sleep(2)
+
+        select_dropdown_by_text(driver, (By.XPATH, create_xpath('Select Size')),
+                                str(tyre_dia) if tyre_dia else '')
+
+        input_element(driver, (By.CSS_SELECTOR, "input[placeholder= 'Min Availability']"), '75')
+        input_element(driver, (By.CSS_SELECTOR, "input[placeholder= 'Rim type']"), model if model else '')
+
+        click_element(driver, (By.XPATH, "(//button[text()= 'Search'])[1]"))
+
+        # Check if the "No rims found" element appears
+        no_rims_found = check_element_exists(driver, (By.XPATH, "//div[text()= 'No rims found']"))
+
+        # If rims WERE found, return True immediately and break the loop
+        if not no_rims_found:
+            return True
+
+        # If we reach here, no rims were found.
+        # The loop will naturally continue to '2DRV by WHEELWORLD' if it's in the list.
+        if gui_callback and current_manufacturer == "WHEELWORLD":
+            gui_callback("No rims found for 'WHEELWORLD'. Retrying with fallback...")
+
+    # If the loop exhausts the list without returning True, then no rims were found at all
+    return False
 
 
 def find_rim_element(driver, tyre_width, tyre_dia, holes, pcd, t_offset, centre_bore):
