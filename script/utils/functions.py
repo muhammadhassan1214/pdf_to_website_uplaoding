@@ -896,6 +896,7 @@ def extract_wheel_specs_from_first_table(first_table_data):
         'holes': None,
         'pcd': None,
         'centre_bore': None,
+        'centre_bore_secondary': None,
         'offset': None
     }
 
@@ -930,9 +931,16 @@ def extract_wheel_specs_from_first_table(first_table_data):
                 if match and specs['pcd'] is None:
                     specs['pcd'] = match.group(1)
             elif any(x in key_normalized for x in ['mittenbohrung', 'mittenloch', 'centre bore', 'center bore', 'hub bore']):
+                # Extract primary centre bore and check for secondary value (preceded by Ø)
                 match = re.search(r'(\d+[,.]?\d*)', value_str)
                 if match and specs['centre_bore'] is None:
                     specs['centre_bore'] = match.group(1).replace(',', '.')
+
+                # Look for secondary centre bore preceded by Ø symbol
+                if specs['centre_bore_secondary'] is None:
+                    secondary_match = re.search(r'Ø\s*(\d+[,.]?\d*)', value_str)
+                    if secondary_match:
+                        specs['centre_bore_secondary'] = secondary_match.group(1).replace(',', '.')
             elif any(x in key_normalized for x in ['einpress', 'offset', ' et ', 'et(mm)', 'tiefe']):
                 match = re.search(r'(\d+)', value_str)
                 if match and specs['offset'] is None:
@@ -1175,8 +1183,8 @@ def parse_data_from_pdf_local(pdf_path, use_cache=True, move_after_processing=Tr
         cache_result(pdf_filename, output_data, pdf_path)
 
         # Move PDF to processed folder after successful extraction
-        if move_after_processing:
-            move_to_processed(pdf_path)
+        # if move_after_processing:
+        #     move_to_processed(pdf_path)
 
     return output_data
 
@@ -1227,8 +1235,8 @@ def parse_data_from_pdf_ai(pdf_path, use_cache=True, move_after_processing=True)
         cache_result(pdf_filename, output_data, pdf_path)
 
         # Move PDF to processed folder after successful extraction
-        if move_after_processing:
-            move_to_processed(pdf_path)
+        # if move_after_processing:
+        #     move_to_processed(pdf_path)
 
     return output_data
 

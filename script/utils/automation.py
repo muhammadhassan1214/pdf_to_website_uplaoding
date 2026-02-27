@@ -6,6 +6,7 @@ and main_processor.py (GUI mode) to avoid code duplication.
 """
 
 import os
+import csv
 import time
 
 from dotenv import load_dotenv
@@ -25,8 +26,57 @@ load_dotenv()
 # Configuration constants
 BASE_URL = 'http://82.165.174.94'
 CHEAP_BRANDS = ['ARIVO', 'GOODRIDE', 'WESTLAKE']
+QUALITY_BRANDS = ['NEXEN', 'KUMHO', 'KLEBER']
 PREMIUM_BRANDS = ['HANKOOK', 'GOODYEAR', 'CONTINENTAL']
 SEASONS = ['Sommerreifen', 'Winterreifen', 'Ganzjahresreifen']
+UNMATCHED_RIMS_CSV = 'unmatched_rims.csv'
+
+
+def log_unmatched_rim(manufacturer, model, tyre_dia):
+    """
+    Log an unmatched rim search to CSV file with duplicate prevention.
+
+    Args:
+        manufacturer: Rim manufacturer name
+        model: Rim model
+        tyre_dia: Tyre diameter/size
+    """
+    csv_path = UNMATCHED_RIMS_CSV
+    headers = ['Manufacturer', 'Model', 'Tyre_Diameter']
+
+    # Check if file exists and read existing entries to prevent duplicates
+    existing_entries = set()
+    file_exists = os.path.exists(csv_path)
+
+    if file_exists:
+        try:
+            with open(csv_path, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    entry_key = (row.get('Manufacturer', ''), row.get('Model', ''), row.get('Tyre_Diameter', ''))
+                    existing_entries.add(entry_key)
+        except Exception as e:
+            logger.warning(f"Could not read existing unmatched_rims.csv: {e}")
+
+    # Create the new entry key
+    new_entry = (str(manufacturer), str(model), str(tyre_dia))
+
+    # Check if entry already exists
+    if new_entry in existing_entries:
+        logger.debug(f"Duplicate unmatched rim entry skipped: {new_entry}")
+        return
+
+    # Append the new entry
+    try:
+        with open(csv_path, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            # Write header if file is new
+            if not file_exists or os.path.getsize(csv_path) == 0:
+                writer.writerow(headers)
+            writer.writerow([manufacturer, model, tyre_dia])
+        logger.info(f"Logged unmatched rim: {manufacturer}, {model}, {tyre_dia}")
+    except Exception as e:
+        logger.warning(f"Could not log unmatched rim to CSV: {e}")
 
 
 def log_message(message, gui_callback=None):
@@ -170,10 +220,6 @@ def navigate_to_rims_page(driver, gui_callback=None):
     time.sleep(2)
 
 
-import time
-from selenium.webdriver.common.by import By
-
-
 def search_rim(driver, model, tyre_dia, rim_manufacturer=None, gui_callback=None):
     """
     Search for a rim with specified parameters.
@@ -209,7 +255,7 @@ def search_rim(driver, model, tyre_dia, rim_manufacturer=None, gui_callback=None
         select_dropdown_by_text(driver, (By.XPATH, create_xpath('Select Size')),
                                 str(tyre_dia) if tyre_dia else '')
 
-        input_element(driver, (By.CSS_SELECTOR, "input[placeholder= 'Min Availability']"), '75')
+        input_element(driver, (By.CSS_SELECTOR, "input[placeholder= 'Min Availability']"), '50')
         input_element(driver, (By.CSS_SELECTOR, "input[placeholder= 'Rim type']"), model if model else '')
 
         click_element(driver, (By.XPATH, "(//button[text()= 'Search'])[1]"))
@@ -227,12 +273,16 @@ def search_rim(driver, model, tyre_dia, rim_manufacturer=None, gui_callback=None
             gui_callback("No rims found for 'WHEELWORLD'. Retrying with fallback...")
 
     # If the loop exhausts the list without returning True, then no rims were found at all
+    # Log the unmatched rim search to CSV
+    log_unmatched_rim(initial_manufacturer, model, tyre_dia)
     return False
 
 
-def find_rim_element(driver, tyre_width, tyre_dia, holes, pcd, t_offset, centre_bore):
+def find_rim_element(driver, tyre_width, tyre_dia, holes, pcd, t_offset, centre_bore, centre_bore_secondary=None):
     """
     Find and click on a specific rim element in the search results.
+
+    If primary centre_bore doesn't match, retry with secondary centre_bore if available.
 
     Args:
         driver: Selenium WebDriver instance
@@ -241,13 +291,21 @@ def find_rim_element(driver, tyre_width, tyre_dia, holes, pcd, t_offset, centre_
         holes: Number of holes
         pcd: Pitch circle diameter
         t_offset: Offset value
-        centre_bore: Centre bore value
+        centre_bore: Centre bore value (primary)
+        centre_bore_secondary: Secondary centre bore value (optional, for retry)
 
     Returns:
         tuple: (element_exists: bool, locator: str)
     """
+    # Try with primary centre bore first
     locator = f"(//tr/td[text()= '{tyre_width}']/following-sibling::td[text()= '{tyre_dia}']/following-sibling::td[text()= '{holes}']/following-sibling::td[text()= '{pcd}']/following-sibling::td[text()= '{t_offset} - {t_offset}']/following-sibling::td[text()= '{centre_bore}'])[1]"
     element_exists = check_element_exists(driver, (By.XPATH, locator), timeout=2)
+
+    # If primary match fails and secondary centre bore is available, retry with secondary
+    if not element_exists and centre_bore_secondary:
+        locator = f"(//tr/td[text()= '{tyre_width}']/following-sibling::td[text()= '{tyre_dia}']/following-sibling::td[text()= '{holes}']/following-sibling::td[text()= '{pcd}']/following-sibling::td[text()= '{t_offset} - {t_offset}']/following-sibling::td[text()= '{centre_bore_secondary}'])[1]"
+        element_exists = check_element_exists(driver, (By.XPATH, locator), timeout=2)
+
     return element_exists, locator
 
 
@@ -328,7 +386,7 @@ def is_driver_valid(driver):
         return False
 
 
-def navigate_and_select_rim(driver, model, tyre_dia, tyre_width, holes, pcd, t_offset, centre_bore, rim_manufacturer=None, gui_callback=None):
+def navigate_and_select_rim(driver, model, tyre_dia, tyre_width, holes, pcd, t_offset, centre_bore, centre_bore_secondary=None, rim_manufacturer=None, gui_callback=None):
     """
     Navigate to rims page, search for rim and select it.
 
@@ -340,7 +398,8 @@ def navigate_and_select_rim(driver, model, tyre_dia, tyre_width, holes, pcd, t_o
         holes: Number of holes
         pcd: Pitch circle diameter
         t_offset: Offset value
-        centre_bore: Centre bore value
+        centre_bore: Centre bore value (primary)
+        centre_bore_secondary: Secondary centre bore value (optional, for retry)
         rim_manufacturer: Rim manufacturer name (e.g., 'BROCK / RC', 'BBS', etc.)
         gui_callback: Optional callback function for logging to GUI
 
@@ -357,7 +416,7 @@ def navigate_and_select_rim(driver, model, tyre_dia, tyre_width, holes, pcd, t_o
 
     # Find specific rim element
     element_exists, locator = find_rim_element(
-        driver, tyre_width, tyre_dia, holes, pcd, t_offset, centre_bore
+        driver, tyre_width, tyre_dia, holes, pcd, t_offset, centre_bore, centre_bore_secondary
     )
 
     if not element_exists:
@@ -380,7 +439,7 @@ def process_single_task(driver, task, gui_callback=None, stop_checker=None, refe
         reference_text: Optional text from PDF reference to append to product description
 
     Returns:
-        dict: Processing result with keys: element_found, premium_created, cheap_created, error
+        dict: Processing result with keys: element_found, premium_created, quality_created, cheap_created, error
     """
     def should_stop():
         return stop_checker() if stop_checker else False
@@ -393,6 +452,7 @@ def process_single_task(driver, task, gui_callback=None, stop_checker=None, refe
     holes = task.get('holes')
     pcd = task.get('pcd')
     centre_bore = task.get('centre_bore')
+    centre_bore_secondary = task.get('centre_bore_secondary')
     t_offset = task.get('offset')
     tire_size = task.get('tire_size')
     rim_manufacturer = task.get('Rim_Manufacturer')
@@ -400,6 +460,7 @@ def process_single_task(driver, task, gui_callback=None, stop_checker=None, refe
     processing_result = {
         'element_found': False,
         'premium_created': False,
+        'quality_created': False,
         'cheap_created': False,
         'error': None
     }
@@ -410,7 +471,7 @@ def process_single_task(driver, task, gui_callback=None, stop_checker=None, refe
 
         # First navigation and rim selection to verify the element exists
         success, locator = navigate_and_select_rim(
-            driver, model, tyre_dia, tyre_width, holes, pcd, t_offset, centre_bore, rim_manufacturer, gui_callback
+            driver, model, tyre_dia, tyre_width, holes, pcd, t_offset, centre_bore, centre_bore_secondary, rim_manufacturer, gui_callback
         )
 
         if not success:
@@ -426,10 +487,22 @@ def process_single_task(driver, task, gui_callback=None, stop_checker=None, refe
         log_message("Starting cheap brand search...", gui_callback)
         cheap_product_created = process_brands_with_navigation(
             driver, title, tire_size, CHEAP_BRANDS, 'cheap',
-            model, tyre_dia, tyre_width, holes, pcd, t_offset, centre_bore,
+            model, tyre_dia, tyre_width, holes, pcd, t_offset, centre_bore, centre_bore_secondary,
             rim_manufacturer, gui_callback, stop_checker, reference_text
         )
         processing_result['cheap_created'] = cheap_product_created
+
+        if should_stop():
+            return processing_result
+
+        # Try quality brands - navigate fresh for each brand type
+        log_message("Starting quality brand search...", gui_callback)
+        quality_product_created = process_brands_with_navigation(
+            driver, title, tire_size, QUALITY_BRANDS, 'quality',
+            model, tyre_dia, tyre_width, holes, pcd, t_offset, centre_bore, centre_bore_secondary,
+            rim_manufacturer, gui_callback, stop_checker, reference_text
+        )
+        processing_result['quality_created'] = quality_product_created
 
         if should_stop():
             return processing_result
@@ -438,7 +511,7 @@ def process_single_task(driver, task, gui_callback=None, stop_checker=None, refe
         log_message("Starting premium brand search...", gui_callback)
         premium_product_created = process_brands_with_navigation(
             driver, title, tire_size, PREMIUM_BRANDS, 'premium',
-            model, tyre_dia, tyre_width, holes, pcd, t_offset, centre_bore,
+            model, tyre_dia, tyre_width, holes, pcd, t_offset, centre_bore, centre_bore_secondary,
             rim_manufacturer, gui_callback, stop_checker, reference_text
         )
         processing_result['premium_created'] = premium_product_created
@@ -457,7 +530,7 @@ def process_single_task(driver, task, gui_callback=None, stop_checker=None, refe
 
 
 def process_brands_with_navigation(driver, title, tire_size, brands, brand_type,
-                                    model, tyre_dia, tyre_width, holes, pcd, t_offset, centre_bore,
+                                    model, tyre_dia, tyre_width, holes, pcd, t_offset, centre_bore, centre_bore_secondary=None,
                                     rim_manufacturer=None, gui_callback=None, stop_checker=None, reference_text=None):
     """
     Process a list of brands with fresh navigation for each attempt.
@@ -475,7 +548,8 @@ def process_brands_with_navigation(driver, title, tire_size, brands, brand_type,
         holes: Number of holes
         pcd: Pitch circle diameter
         t_offset: Offset value
-        centre_bore: Centre bore value
+        centre_bore: Centre bore value (primary)
+        centre_bore_secondary: Secondary centre bore value (optional, for retry)
         rim_manufacturer: Rim manufacturer name (e.g., 'BROCK / RC', 'BBS', etc.)
         gui_callback: Optional callback function for logging to GUI
         stop_checker: Optional function that returns True if stop was requested
@@ -509,7 +583,7 @@ def process_brands_with_navigation(driver, title, tire_size, brands, brand_type,
             try:
                 # Navigate to rims page and select rim fresh for each search
                 success, locator = navigate_and_select_rim(
-                    driver, model, tyre_dia, tyre_width, holes, pcd, t_offset, centre_bore, rim_manufacturer, gui_callback
+                    driver, model, tyre_dia, tyre_width, holes, pcd, t_offset, centre_bore, centre_bore_secondary, rim_manufacturer, gui_callback
                 )
 
                 if not success:
