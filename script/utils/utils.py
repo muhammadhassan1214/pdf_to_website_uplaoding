@@ -104,9 +104,17 @@ def input_element(driver, by_locator, text):
 
 
 def select_dropdown_by_text(driver, by_locator, text):
-    element = WebDriverWait(driver, 10).until(EC.element_to_be_clickable(by_locator))
-    select = Select(element)
-    select.select_by_visible_text(text)
+    try:
+        element = WebDriverWait(driver, 10).until(EC.element_to_be_clickable(by_locator))
+        select = Select(element)
+        select.select_by_visible_text(text)
+        return True
+    except TimeoutException:
+        logger.warning(f"Dropdown element not found for selection within 10 seconds: {by_locator}")
+        return False
+    except NoSuchElementException:
+        logger.warning(f"Option '{text}' not found in dropdown: {by_locator}")
+        return False
 
 
 def get_normal_driver(headless: bool = False) -> webdriver.Chrome:
@@ -133,15 +141,14 @@ def get_normal_driver(headless: bool = False) -> webdriver.Chrome:
     driver.get("data:,")
     return driver
 
-def wait_while_element_is_displaying(driver, by_locator, timeout=10):
-    """Waits while the specified element is displayed."""
-    start_time = time.time()
-    while time.time() - start_time < timeout:
-        try:
-            element = driver.find_element(by_locator)
-            if not element.is_displayed():
-                return
-        except Exception:
-            return
-        time.sleep(0.5)
-    logger.warning(f"Timeout waiting for element {by_locator} to stop displaying.")
+def wait_while_element_is_displaying(driver, by_locator, timeout: int = 30) -> bool:
+    """Wait while element is displaying with exception handling."""
+    try:
+        WebDriverWait(driver, timeout).until_not(EC.visibility_of_element_located(by_locator))
+        return True
+    except TimeoutException:
+        logger.warning(f"Element still visible after {timeout} seconds: {by_locator}")
+        return False
+    except WebDriverException as e:
+        logger.error(f"Error waiting for element to disappear: {e}")
+        return False

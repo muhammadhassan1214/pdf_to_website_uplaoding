@@ -387,29 +387,6 @@ def ensure_processed_folder_exists():
         print(f"Created processed documents folder: {PROCESSED_DOCS_FOLDER}")
 
 
-def move_to_processed(pdf_path):
-    ensure_processed_folder_exists()
-
-    try:
-        filename = os.path.basename(pdf_path)
-        destination = os.path.join(PROCESSED_DOCS_FOLDER, filename)
-
-        # Handle duplicate filenames
-        if os.path.exists(destination):
-            base, ext = os.path.splitext(filename)
-            counter = 1
-            while os.path.exists(destination):
-                destination = os.path.join(PROCESSED_DOCS_FOLDER, f"{base}_{counter}{ext}")
-                counter += 1
-
-        shutil.move(pdf_path, destination)
-        print(f"Moved processed PDF to: {destination}")
-        return destination
-    except (IOError, shutil.Error) as e:
-        print(f"Error moving file: {e}")
-        return None
-
-
 def extract_model_from_text(pdf_text):
     # Pattern to match "Modell" followed by the model name (e.g., "Modell B44")
     pattern = r'Modell\s+([A-Za-z0-9]+)'
@@ -761,6 +738,7 @@ Your task is to analyze the provided PDF text and extract the following informat
    - holes: Number of bolt holes (Lochzahl, e.g., "4", "5")
    - pcd: Pitch Circle Diameter (Lochkreis, e.g., "108", "112", "120")
    - centre_bore: Center bore diameter (Mittenbohrung, e.g., "66.6", "72.6", "63.4"). Convert comma to decimal point.
+   - centre_bore_secondary: Secondary centre bore value if present, typically preceded by Ø symbol (e.g., "Ø70,0" -> "70.0"). Look in columns like "Kennzeichnung Rad/Zentrierring". Return null if not found.
    - offset: Offset value (Einpreßtiefe/ET, e.g., "48", "42", "35")
    These are often in a format like "5/112/66,6" with offset separately.
 
@@ -824,6 +802,7 @@ Return your response as a JSON object with a "data" key containing an array:
             "holes": "string",
             "pcd": "string",
             "centre_bore": "string",
+            "centre_bore_secondary": "string or null (secondary centre bore preceded by Ø if found)",
             "offset": "string",
             "tire_size": "string"
         },
@@ -936,11 +915,13 @@ def extract_wheel_specs_from_first_table(first_table_data):
                 if match and specs['centre_bore'] is None:
                     specs['centre_bore'] = match.group(1).replace(',', '.')
 
+            elif any(x in key_normalized for x in ['kennzeichnung rad/ zentrierring', 'kennzeichnung', 'zentrierring', 'rad']):
                 # Look for secondary centre bore preceded by Ø symbol
                 if specs['centre_bore_secondary'] is None:
                     secondary_match = re.search(r'Ø\s*(\d+[,.]?\d*)', value_str)
                     if secondary_match:
                         specs['centre_bore_secondary'] = secondary_match.group(1).replace(',', '.')
+
             elif any(x in key_normalized for x in ['einpress', 'offset', ' et ', 'et(mm)', 'tiefe']):
                 match = re.search(r'(\d+)', value_str)
                 if match and specs['offset'] is None:
@@ -1128,6 +1109,7 @@ def parse_data_from_pdf_local(pdf_path, use_cache=True, move_after_processing=Tr
                     'holes': wheel_specs['holes'],
                     'pcd': wheel_specs['pcd'],
                     'centre_bore': wheel_specs['centre_bore'],
+                    'centre_bore_secondary': wheel_specs['centre_bore_secondary'],
                     'offset': wheel_specs['offset'],
                     'tire_size': group['tire_size'],
                     'Rim_Manufacturer': rim_manufacturer
@@ -1160,6 +1142,7 @@ def parse_data_from_pdf_local(pdf_path, use_cache=True, move_after_processing=Tr
             'holes': wheel_specs['holes'],
             'pcd': wheel_specs['pcd'],
             'centre_bore': wheel_specs['centre_bore'],
+            'centre_bore_secondary': wheel_specs['centre_bore_secondary'],
             'offset': wheel_specs['offset'],
             'tire_size': None,
             'Rim_Manufacturer': rim_manufacturer
@@ -1215,7 +1198,7 @@ def parse_data_from_pdf_ai(pdf_path, use_cache=True, move_after_processing=True)
 
     # Ensure all required keys exist and handle null values
     required_keys = ['Title', 'Model', 'Tyre_Width', 'Tyre_dia', 'holes',
-                     'pcd', 'centre_bore', 'offset', 'tire_size']
+                     'pcd', 'centre_bore', 'centre_bore_secondary', 'offset', 'tire_size']
 
     for item in output_data:
         for key in required_keys:

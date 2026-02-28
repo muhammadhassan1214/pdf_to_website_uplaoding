@@ -7,12 +7,12 @@ Uses common functions from script.utils.automation to avoid code duplication.
 import os
 
 from script.utils.functions import (
-    get_pdf_paths, parse_data_from_pdf, validate_task,
-    load_cache, move_task_to_processed, process_tasks_with_title_splitting,
+    parse_data_from_pdf, validate_task,
+    move_task_to_processed,
     delete_cache_file, remove_duplicate_tasks_from_cache,
     extract_reference_text_from_pdf
 )
-from script.utils.utils import get_normal_driver, logger
+from script.utils.utils import get_normal_driver
 from script.utils.automation import (
     login, process_single_task, is_driver_valid, log_message
 )
@@ -22,10 +22,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def run_automation(pdf_path=None, reference_number=None, brand_filter=None, gui_callback=None, stop_checker=None, driver_setter=None):
     """
-    Main automation function that processes PDFs and automates website interactions.
+    Main automation function that processes a single PDF and automates website interactions.
 
     Args:
-        pdf_path: Optional path to a specific PDF file. If None, processes all PDFs from documents folder.
+        pdf_path: Path to the PDF file to process (required).
         reference_number: Optional reference number (e.g., A12) to extract text for product descriptions.
         brand_filter: Optional brand name to filter tasks (e.g., "Audi", "BMW"). "All Brands" means no filter.
         gui_callback: Optional callback function for logging to GUI.
@@ -61,112 +61,58 @@ def run_automation(pdf_path=None, reference_number=None, brand_filter=None, gui_
         # Delete cache file for fresh run
         delete_cache_file()
 
-        # Determine which PDFs to process
-        if pdf_path:
-            # Process specific PDF file
-            if os.path.exists(pdf_path):
-                all_files = [pdf_path]
-                log_message(f"Processing: {os.path.basename(pdf_path)}", gui_callback)
+        # Validate PDF path is provided
+        if not pdf_path:
+            log_message("No PDF file specified. Please select a PDF file.", gui_callback)
+            return False
 
-                # Extract reference text from the specific PDF if reference number is provided
-                if reference_number:
-                    reference_text = extract_reference_text_from_pdf(pdf_path, [i.strip() for i in reference_number.split(',')])
-                    if reference_text:
-                        log_message(f"Reference text found: {reference_text[:50]}...", gui_callback)
-                    else:
-                        log_message(f"Reference '{reference_number}' not found in PDF", gui_callback)
+        if not os.path.exists(pdf_path):
+            log_message(f"PDF not found: {pdf_path}", gui_callback)
+            return False
+
+        pdf_filename = os.path.basename(pdf_path)
+        log_message(f"Processing: {pdf_filename}", gui_callback)
+
+        # Extract reference text from the PDF if reference number is provided
+        if reference_number:
+            reference_text = extract_reference_text_from_pdf(pdf_path, [i.strip() for i in reference_number.split(',')])
+            if reference_text:
+                log_message(f"Reference text found: {reference_text[:50]}...", gui_callback)
             else:
-                log_message(f"PDF not found: {pdf_path}", gui_callback)
-                return False
+                log_message(f"Reference '{reference_number}' not found in PDF", gui_callback)
+
+        if should_stop():
+            log_message("Processing stopped by user", gui_callback)
+            return False
+
+        # Parse data from PDF file
+        file_data_list = parse_data_from_pdf(pdf_path)
+
+        if not file_data_list:
+            log_message(f"No valid data found in: {pdf_filename}", gui_callback)
+            return False
+
+        # Apply Brand Filtering if selected
+        if brand_filter and brand_filter != "All Brands":
+            original_count = len(file_data_list)
+            file_data_list = filter_tasks_by_brand(file_data_list, brand_filter)
+            if len(file_data_list) < original_count:
+                log_message(f"  → Filtered by brand '{brand_filter}': {len(file_data_list)} of {original_count} tasks kept", gui_callback)
+
+        # Validate and filter tasks
+        valid_tasks = []
+        for task in file_data_list:
+            is_valid, missing = validate_task(task)
+            if is_valid:
+                task['_source_pdf'] = pdf_filename
+                valid_tasks.append(task)
+
+        if valid_tasks:
+            task_list.extend(valid_tasks)
+            log_message(f"  → {len(valid_tasks)} valid task(s) extracted", gui_callback)
         else:
-            # Process all PDFs from documents folder
-            pdf_dir = os.path.join(BASE_DIR, '..', 'documents')
-            if not os.path.exists(pdf_dir):
-                log_message(f"PDF directory not found: {pdf_dir}", gui_callback)
-                return False
-            all_files = get_pdf_paths(pdf_dir)
-
-            # For multiple PDFs, extract reference text from the first one if reference number provided
-            if reference_number and all_files:
-                reference_text = extract_reference_text_from_pdf(all_files[0], reference_number)
-                if reference_text:
-                    log_message(f"Reference text found: {reference_text[:50]}...", gui_callback)
-                else:
-                    log_message(f"Reference '{reference_number}' not found in PDF", gui_callback)
-
-        log_message(f"Found {len(all_files)} PDF file(s)", gui_callback)
-
-        # Parse data from PDF files
-        for file in all_files:
-            if should_stop():
-                log_message("Processing stopped by user", gui_callback)
-                return False
-
-            pdf_filename = os.path.basename(file)
-            log_message(f"Processing: {pdf_filename}", gui_callback)
-            file_data_list = parse_data_from_pdf(file)
-
-            if not file_data_list:
-                log_message(f"No valid data found in: {pdf_filename}", gui_callback)
-                continue
-
-            # Apply Brand Filtering if selected
-            if brand_filter and brand_filter != "All Brands":
-                original_count = len(file_data_list)
-                file_data_list = filter_tasks_by_brand(file_data_list, brand_filter)
-                if len(file_data_list) < original_count:
-                    log_message(f"  → Filtered by brand '{brand_filter}': {len(file_data_list)} of {original_count} tasks kept", gui_callback)
-
-            # Validate and filter tasks
-            valid_tasks = []
-            for task in file_data_list:
-                is_valid, missing = validate_task(task)
-                if is_valid:
-                    task['_source_pdf'] = pdf_filename
-                    valid_tasks.append(task)
-
-            if valid_tasks:
-                task_list.extend(valid_tasks)
-                log_message(f"  → {len(valid_tasks)} valid task(s) extracted", gui_callback)
-            else:
-                log_message(f"  → No valid matches found in: {pdf_filename}", gui_callback)
-
-        # If no new PDFs found, load from cache
-        if not all_files:
-            log_message("No PDFs in documents folder. Checking cache...", gui_callback)
-            cache = load_cache()
-            if cache:
-                for pdf_filename, cache_entry in cache.items():
-                    if should_stop():
-                        log_message("Processing stopped by user", gui_callback)
-                        return False
-
-                    log_message(f"Loading from cache: {pdf_filename}", gui_callback)
-                    cached_data = cache_entry.get('data', [])
-
-                    cached_data = process_tasks_with_title_splitting(cached_data, max_title_length=80)
-
-                    # Apply Brand Filtering to cached data if selected
-                    if brand_filter and brand_filter != "All Brands":
-                        original_count = len(cached_data)
-                        cached_data = filter_tasks_by_brand(cached_data, brand_filter)
-                        if len(cached_data) < original_count:
-                            log_message(f"  → Filtered by brand '{brand_filter}': {len(cached_data)} of {original_count} tasks kept", gui_callback)
-
-                    valid_tasks = []
-                    for task in cached_data:
-                        is_valid, missing = validate_task(task)
-                        if is_valid:
-                            task['_source_pdf'] = pdf_filename
-                            valid_tasks.append(task)
-
-                    if valid_tasks:
-                        task_list.extend(valid_tasks)
-                        log_message(f"  → {len(valid_tasks)} valid task(s) from cache", gui_callback)
-                    else:
-                        log_message(f"  → No valid matches in cached: {pdf_filename}", gui_callback)
-            else:
-                log_message("No cached data available.", gui_callback)
+            log_message(f"  → No valid matches found in: {pdf_filename}", gui_callback)
+            return False
 
         log_message(f"Total tasks: {len(task_list)}", gui_callback)
 
@@ -174,10 +120,10 @@ def run_automation(pdf_path=None, reference_number=None, brand_filter=None, gui_
             log_message("No valid tasks found (check PDF content or Brand Filter). Exiting.", gui_callback)
             return False
 
-        # Remove duplicate tasks from cache before processing
+        # Remove duplicate tasks
         duplicates_removed, removal_details = remove_duplicate_tasks_from_cache()
         if duplicates_removed > 0:
-            log_message(f"Removed {duplicates_removed} duplicate task(s) from cache", gui_callback)
+            log_message(f"Removed {duplicates_removed} duplicate task(s)", gui_callback)
             # Reload task list to exclude duplicates
             seen_task_keys = set()
             unique_task_list = []

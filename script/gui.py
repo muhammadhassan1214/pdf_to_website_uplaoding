@@ -80,7 +80,7 @@ class PDFProcessorApp:
         # Hint label
         hint_label = ttk.Label(
             path_frame,
-            text="Select a PDF file or leave empty to process all PDFs from the documents folder",
+            text="Select a PDF file to process",
             font=('Helvetica', 9, 'italic'),
             foreground='gray'
         )
@@ -277,8 +277,12 @@ class PDFProcessorApp:
         # Get the PDF path
         pdf_path = self.pdf_path.get().strip()
 
-        # Validate if a specific file is selected
-        if pdf_path and not os.path.exists(pdf_path):
+        # Validate that a file is selected
+        if not pdf_path:
+            messagebox.showerror("Error", "Please select a PDF file to process.")
+            return
+
+        if not os.path.exists(pdf_path):
             messagebox.showerror("Error", f"File not found: {pdf_path}")
             return
 
@@ -292,10 +296,7 @@ class PDFProcessorApp:
 
         self._log_message("=" * 50)
         self._log_message("Starting PDF processing...", 'INFO')
-        if pdf_path:
-            self._log_message(f"Processing specific file: {pdf_path}")
-        else:
-            self._log_message("Processing all PDFs from documents folder")
+        self._log_message(f"Processing file: {pdf_path}")
 
         ref_num = self.reference_number.get().strip()
         if ref_num:
@@ -380,8 +381,9 @@ class PDFProcessorApp:
             else:
                 self.root.after(0, lambda: self._log_message("Processing finished with warnings.", 'WARNING'))
 
-        except:
-            self.root.after(0, lambda: self._log_message(f"Error during processing: {e}", 'ERROR'))
+        except Exception as e:
+            error_msg = str(e)
+            self.root.after(0, lambda msg=error_msg: self._log_message(f"Error during processing: {msg}", 'ERROR'))
         finally:
             self.root.after(0, self._processing_complete)
 
