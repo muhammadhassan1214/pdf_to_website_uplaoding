@@ -239,7 +239,7 @@ def search_rim(driver, model, tyre_dia, rim_manufacturer=None, gui_callback=None
         if not select_dropdown_by_text(driver, (By.XPATH, Sl.COMMON_ELEMENT('Select Size')),
                                 str(tyre_dia) if tyre_dia else ''):
             log_message(f"Size dropdown option not found for tyre diameter: {tyre_dia}", gui_callback)
-            return False
+            continue
 
         input_element(driver, (By.CSS_SELECTOR, "input[placeholder= 'Min Availability']"), '50')
         input_element(driver, (By.CSS_SELECTOR, "input[placeholder= 'Rim type']"), model if model else '')
